@@ -59,13 +59,16 @@ services:
       context: ${AI_CONTEXT:-../fluent-ai}
       dockerfile: Dockerfile.dev
     ports:
-      - "${AI_PORT:-8888}:8888"
+      - "${AI_PORT:-8200}:8200"
     volumes:
-      - ${AI_CONTEXT:-../fluent-ai}:/app
-      - /app/node_modules
+      - ${AI_CONTEXT:-../fluent-ai}/src:/app/src:cached
+      - ${AI_CONTEXT:-../fluent-ai}/pyproject.toml:/app/pyproject.toml:ro
+      - ${AI_CONTEXT:-../fluent-ai}/uv.lock:/app/uv.lock:ro
     env_file: ${AI_CONTEXT:-../fluent-ai}/.env
     environment:
-      DATABASE_URL: postgres://postgres:postgres@db:5432/fluent
+      DATABASE_URL: "postgresql+asyncpg://postgres:postgres@db:5432/fluent"
+      ENVIRONMENT: development
+      DEBUG: "true"
     depends_on:
       api:
         condition: service_healthy
@@ -75,7 +78,7 @@ services:
       context: ${WEB_CONTEXT:-../fluent-web}
       dockerfile: Dockerfile.dev
     ports:
-      - "${WEB_PORT:-3000}:3000"
+      - "${WEB_PORT:-5173}:5173"
     volumes:
       - ${WEB_CONTEXT:-../fluent-web}:/app
       - /app/node_modules

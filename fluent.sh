@@ -89,7 +89,11 @@ case "$cmd" in
   test)
     service="${1:?Usage: fluent.sh test <service>}"
     shift
-    $COMPOSE_CMD exec "$service" npm run test "$@"
+    if [ "$service" = "ai" ]; then
+      $COMPOSE_CMD exec ai uv run pytest "$@"
+    else
+      $COMPOSE_CMD exec "$service" npm run test "$@"
+    fi
     ;;
 
   # ── Database commands ──────────────────────────────────────────────────────
@@ -103,13 +107,22 @@ case "$cmd" in
         ;;
       ai)
         echo "Running fluent-ai migrations..."
-        $COMPOSE_CMD exec ai npm run db:migrate
+        # TODO: uncomment when ai schema migrations are set up
+        # $COMPOSE_CMD exec ai uv run alembic upgrade head
+        echo "  (no migrations configured yet)"
         ;;
       all)
-        echo "Running fluent-api migrations..."
-        $COMPOSE_CMD exec api npx drizzle-kit migrate
-        echo "Running fluent-ai migrations..."
-        $COMPOSE_CMD exec ai npm run db:migrate
+        read -rp "Run migrations for all services? [y/N] " confirm
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+          "$0" db:migrate api
+          "$0" db:migrate ai
+        else
+          echo "Aborted."
+        fi
+        ;;
+      web|db)
+        echo "The $target service does not have its own migrations."
+        exit 1
         ;;
       *)
         echo "Unknown migrate target: $target (use api, ai, or all)"
@@ -122,21 +135,29 @@ case "$cmd" in
     case "$target" in
       api)
         echo "Running fluent-api seeds..."
-        $COMPOSE_CMD exec api npx tsx src/db/seeds/roles.ts
+        # TODO: uncomment when seed files are created
+        # $COMPOSE_CMD exec api npx tsx src/db/seeds/roles.ts
         $COMPOSE_CMD exec api npx tsx src/db/seeds/rbac.ts
-        $COMPOSE_CMD exec api npx tsx src/db/seeds/users.ts
+        # $COMPOSE_CMD exec api npx tsx src/db/seeds/users.ts
         ;;
       ai)
         echo "Running fluent-ai seeds..."
-        $COMPOSE_CMD exec ai npm run db:seed
+        # TODO: uncomment when ai seeds are created
+        # $COMPOSE_CMD exec ai uv run python src/db/seeds/seed.py
+        echo "  (no seeds configured yet)"
         ;;
       all)
-        echo "Running fluent-api seeds..."
-        $COMPOSE_CMD exec api npx tsx src/db/seeds/roles.ts
-        $COMPOSE_CMD exec api npx tsx src/db/seeds/rbac.ts
-        $COMPOSE_CMD exec api npx tsx src/db/seeds/users.ts
-        echo "Running fluent-ai seeds..."
-        $COMPOSE_CMD exec ai npm run db:seed
+        read -rp "Run seeds for all services? [y/N] " confirm
+        if [[ "$confirm" =~ ^[Yy]$ ]]; then
+          "$0" db:seed api
+          "$0" db:seed ai
+        else
+          echo "Aborted."
+        fi
+        ;;
+      web|db)
+        echo "The $target service does not have its own seeds."
+        exit 1
         ;;
       *)
         echo "Unknown seed target: $target (use api, ai, or all)"
@@ -146,9 +167,16 @@ case "$cmd" in
     ;;
   db:init)
     echo "Full database initialization (migrations + seeds)..."
-    "$0" db:migrate all
-    "$0" db:seed all
-    echo "Database initialization complete."
+    read -rp "This will run all migrations and seeds. Continue? [y/N] " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+      "$0" db:migrate api
+      "$0" db:migrate ai
+      "$0" db:seed api
+      "$0" db:seed ai
+      echo "Database initialization complete."
+    else
+      echo "Aborted."
+    fi
     ;;
   db:studio)
     echo "Running Drizzle Studio on host (requires local Node.js)..."
@@ -178,6 +206,20 @@ case "$cmd" in
           ai) rm -f "${AI_CONTEXT}/.db-initialized" ;;
         esac
       fi
+    else
+      echo "Aborted."
+    fi
+    ;;
+  fresh)
+    echo "This will destroy ALL containers, volumes, and images for this project."
+    echo "The database will be wiped and everything will be rebuilt from scratch."
+    read -rp "Continue? [y/N] " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+      $COMPOSE_CMD down -v --rmi local --remove-orphans
+      rm -f "${API_CONTEXT}/.db-initialized"
+      rm -f "${AI_CONTEXT}/.db-initialized"
+      echo ""
+      echo "Clean slate. Run './fluent.sh up' to rebuild and start everything."
     else
       echo "Aborted."
     fi
@@ -260,6 +302,7 @@ Database:
 
 Lifecycle:
   clean [service]        Remove containers and volumes (full reset)
+  fresh                  Nuke everything: containers, volumes, and images
   build [service...]     Rebuild containers without cache
   check-repos            Verify sibling repos exist
   setup                  Clone repos, copy .env files, first-time setup

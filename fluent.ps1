@@ -102,7 +102,11 @@ switch ($Command) {
         if ($Args.Count -lt 1) { Write-Error "Usage: fluent.ps1 test <service>"; exit 1 }
         $service = $Args[0]
         $remaining = if ($Args.Count -gt 1) { $Args[1..($Args.Count - 1)] } else { @() }
-        Invoke-Compose @("exec", $service, "npm", "run", "test") + $remaining
+        if ($service -eq "ai") {
+            Invoke-Compose @("exec", "ai", "uv", "run", "pytest") + $remaining
+        } else {
+            Invoke-Compose @("exec", $service, "npm", "run", "test") + $remaining
+        }
     }
 
     # ── Database commands ──────────────────────────────────────────────────────
@@ -116,13 +120,21 @@ switch ($Command) {
             }
             "ai" {
                 Write-Host "Running fluent-ai migrations..."
-                Invoke-Compose @("exec", "ai", "npm", "run", "db:migrate")
+                # TODO: uncomment when ai schema migrations are set up
+                # Invoke-Compose @("exec", "ai", "uv", "run", "alembic", "upgrade", "head")
+                Write-Host "  (no migrations configured yet)"
             }
             "all" {
-                Write-Host "Running fluent-api migrations..."
-                Invoke-Compose @("exec", "api", "npx", "drizzle-kit", "migrate")
-                Write-Host "Running fluent-ai migrations..."
-                Invoke-Compose @("exec", "ai", "npm", "run", "db:migrate")
+                $confirm = Read-Host "Run migrations for all services? [y/N]"
+                if ($confirm -match "^[Yy]$") {
+                    & $MyInvocation.MyCommand.Path "db:migrate" "api"
+                    & $MyInvocation.MyCommand.Path "db:migrate" "ai"
+                } else {
+                    Write-Host "Aborted."
+                }
+            }
+            { $_ -in "web", "db" } {
+                Write-Error "The $target service does not have its own migrations."
             }
             default {
                 Write-Error "Unknown migrate target: $target (use api, ai, or all)"
@@ -134,21 +146,28 @@ switch ($Command) {
         switch ($target) {
             "api" {
                 Write-Host "Running fluent-api seeds..."
-                Invoke-Compose @("exec", "api", "npx", "tsx", "src/db/seeds/roles.ts")
+                # TODO: uncomment when seed files are created
+                # Invoke-Compose @("exec", "api", "npx", "tsx", "src/db/seeds/roles.ts")
                 Invoke-Compose @("exec", "api", "npx", "tsx", "src/db/seeds/rbac.ts")
-                Invoke-Compose @("exec", "api", "npx", "tsx", "src/db/seeds/users.ts")
+                # Invoke-Compose @("exec", "api", "npx", "tsx", "src/db/seeds/users.ts")
             }
             "ai" {
                 Write-Host "Running fluent-ai seeds..."
-                Invoke-Compose @("exec", "ai", "npm", "run", "db:seed")
+                # TODO: uncomment when ai seeds are created
+                # Invoke-Compose @("exec", "ai", "uv", "run", "python", "src/db/seeds/seed.py")
+                Write-Host "  (no seeds configured yet)"
             }
             "all" {
-                Write-Host "Running fluent-api seeds..."
-                Invoke-Compose @("exec", "api", "npx", "tsx", "src/db/seeds/roles.ts")
-                Invoke-Compose @("exec", "api", "npx", "tsx", "src/db/seeds/rbac.ts")
-                Invoke-Compose @("exec", "api", "npx", "tsx", "src/db/seeds/users.ts")
-                Write-Host "Running fluent-ai seeds..."
-                Invoke-Compose @("exec", "ai", "npm", "run", "db:seed")
+                $confirm = Read-Host "Run seeds for all services? [y/N]"
+                if ($confirm -match "^[Yy]$") {
+                    & $MyInvocation.MyCommand.Path "db:seed" "api"
+                    & $MyInvocation.MyCommand.Path "db:seed" "ai"
+                } else {
+                    Write-Host "Aborted."
+                }
+            }
+            { $_ -in "web", "db" } {
+                Write-Error "The $target service does not have its own seeds."
             }
             default {
                 Write-Error "Unknown seed target: $target (use api, ai, or all)"
@@ -157,9 +176,16 @@ switch ($Command) {
     }
     "db:init" {
         Write-Host "Full database initialization (migrations + seeds)..."
-        & $MyInvocation.MyCommand.Path "db:migrate" "all"
-        & $MyInvocation.MyCommand.Path "db:seed" "all"
-        Write-Host "Database initialization complete."
+        $confirm = Read-Host "This will run all migrations and seeds. Continue? [y/N]"
+        if ($confirm -match "^[Yy]$") {
+            & $MyInvocation.MyCommand.Path "db:migrate" "api"
+            & $MyInvocation.MyCommand.Path "db:migrate" "ai"
+            & $MyInvocation.MyCommand.Path "db:seed" "api"
+            & $MyInvocation.MyCommand.Path "db:seed" "ai"
+            Write-Host "Database initialization complete."
+        } else {
+            Write-Host "Aborted."
+        }
     }
     "db:studio" {
         $port = if ($env:DB_PORT) { $env:DB_PORT } else { "5432" }
@@ -189,6 +215,20 @@ switch ($Command) {
                     "ai" { Remove-Item -Force -ErrorAction SilentlyContinue "$AiContext/.db-initialized" }
                 }
             }
+        } else {
+            Write-Host "Aborted."
+        }
+    }
+    "fresh" {
+        Write-Host "This will destroy ALL containers, volumes, and images for this project."
+        Write-Host "The database will be wiped and everything will be rebuilt from scratch."
+        $confirm = Read-Host "Continue? [y/N]"
+        if ($confirm -match "^[Yy]$") {
+            Invoke-Compose @("down", "-v", "--rmi", "local", "--remove-orphans")
+            Remove-Item -Force -ErrorAction SilentlyContinue "$ApiContext/.db-initialized"
+            Remove-Item -Force -ErrorAction SilentlyContinue "$AiContext/.db-initialized"
+            Write-Host ""
+            Write-Host "Clean slate. Run '.\fluent.ps1 up' to rebuild and start everything."
         } else {
             Write-Host "Aborted."
         }
@@ -271,6 +311,7 @@ Database:
 
 Lifecycle:
   clean [service]        Remove containers and volumes (full reset)
+  fresh                  Nuke everything: containers, volumes, and images
   build [service...]     Rebuild containers without cache
   check-repos            Verify sibling repos exist
   setup                  Clone repos, copy .env files, first-time setup
