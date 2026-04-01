@@ -86,14 +86,25 @@ services:
     ports:
       - "${AI_PORT:-8200}:8200"
     volumes:
-      - ${AI_CONTEXT:-../fluent-ai}/src:/app/src:cached
+      - ${AI_CONTEXT:-../fluent-ai}/src:/app/src:ro
       - ${AI_CONTEXT:-../fluent-ai}/pyproject.toml:/app/pyproject.toml:ro
       - ${AI_CONTEXT:-../fluent-ai}/uv.lock:/app/uv.lock:ro
+      - ${AI_CONTEXT:-../fluent-ai}/docker-entrypoint.sh:/app/docker-entrypoint.sh:ro
     env_file: ${AI_CONTEXT:-../fluent-ai}/.env
     environment:
       DATABASE_URL: "postgresql+asyncpg://postgres:postgres@db:5432/fluent"
       ENVIRONMENT: development
       DEBUG: "true"
+      UV_CACHE_DIR: /app/.cache/uv
+    user: "1001:1001"
+    read_only: true
+    tmpfs:
+      - /tmp:nosuid,size=64m
+      - /app/.cache:noexec,nosuid,size=128m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     depends_on:
       api:
         condition: service_healthy
