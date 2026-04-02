@@ -116,10 +116,25 @@ services:
     ports:
       - "${WEB_PORT:-5173}:5173"
     volumes:
-      - ${WEB_CONTEXT:-../fluent-web}:/app
+      - ${WEB_CONTEXT:-../fluent-web}/src:/app/src:ro
+      - ${WEB_CONTEXT:-../fluent-web}/public:/app/public:ro
+      - ${WEB_CONTEXT:-../fluent-web}/index.html:/app/index.html:ro
+      - ${WEB_CONTEXT:-../fluent-web}/vite.config.ts:/app/vite.config.ts
+      - ${WEB_CONTEXT:-../fluent-web}/tsconfig.json:/app/tsconfig.json:ro
+      - ${WEB_CONTEXT:-../fluent-web}/tsconfig.node.json:/app/tsconfig.node.json:ro
+      - ${WEB_CONTEXT:-../fluent-web}/components.json:/app/components.json:ro
+      - ${WEB_CONTEXT:-../fluent-web}/.env:/app/.env:ro
       - /app/node_modules
     environment:
-      VITE_API_URL: "http://localhost:${API_PORT:-9999}"
+      COREPACK_HOME: /app/.cache/corepack
+    user: "1001:1001"
+    tmpfs:
+      - /tmp:nosuid,size=64m
+      - /app/.cache:noexec,nosuid,uid=1001,gid=1001,size=128m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     depends_on:
       api:
         condition: service_healthy
