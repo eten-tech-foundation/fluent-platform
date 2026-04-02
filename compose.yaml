@@ -27,7 +27,7 @@ services:
       - ${API_CONTEXT:-../fluent-api}/tsconfig.json:/app/tsconfig.json:ro
       - ${API_CONTEXT:-../fluent-api}/drizzle.config.ts:/app/drizzle.config.ts:ro
       - ${API_CONTEXT:-../fluent-api}/docker-entrypoint.sh:/app/docker-entrypoint.sh:ro
-      - /app/node_modules
+      - fluent-api-node-modules:/app/node_modules
     env_file: ${API_CONTEXT:-../fluent-api}/.env
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/fluent
@@ -59,7 +59,7 @@ services:
     volumes:
       - ${API_CONTEXT:-../fluent-api}/src:/app/src:ro
       - ${API_CONTEXT:-../fluent-api}/tsconfig.json:/app/tsconfig.json:ro
-      - /app/node_modules
+      - fluent-worker-node-modules:/app/node_modules
     env_file: ${API_CONTEXT:-../fluent-api}/.env
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/fluent
@@ -124,7 +124,7 @@ services:
       - ${WEB_CONTEXT:-../fluent-web}/tsconfig.node.json:/app/tsconfig.node.json:ro
       - ${WEB_CONTEXT:-../fluent-web}/components.json:/app/components.json:ro
       - ${WEB_CONTEXT:-../fluent-web}/.env:/app/.env:ro
-      - /app/node_modules
+      - fluent-web-node-modules:/app/node_modules
     environment:
       COREPACK_HOME: /app/.cache/corepack
     user: "1001:1001"
@@ -141,3 +141,6 @@ services:
 
 volumes:
   fluent-pgdata:
+  fluent-api-node-modules:
+  fluent-worker-node-modules:
+  fluent-web-node-modules:
