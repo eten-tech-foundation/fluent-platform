@@ -116,13 +116,14 @@ services:
     ports:
       - "${WEB_PORT:-5173}:5173"
     volumes:
-      - ${WEB_CONTEXT:-../fluent-web}/src:/app/src:ro
+      - ${WEB_CONTEXT:-../fluent-web}/src:/app/src
       - ${WEB_CONTEXT:-../fluent-web}/public:/app/public:ro
       - ${WEB_CONTEXT:-../fluent-web}/index.html:/app/index.html:ro
       - ${WEB_CONTEXT:-../fluent-web}/vite.config.ts:/app/vite.config.ts
       - ${WEB_CONTEXT:-../fluent-web}/tsconfig.json:/app/tsconfig.json:ro
       - ${WEB_CONTEXT:-../fluent-web}/tsconfig.node.json:/app/tsconfig.node.json:ro
       - ${WEB_CONTEXT:-../fluent-web}/components.json:/app/components.json:ro
+      - ${WEB_CONTEXT:-../fluent-web}/eslint.config.js:/app/eslint.config.js:ro
       - ${WEB_CONTEXT:-../fluent-web}/.env:/app/.env:ro
       - fluent-web-node-modules:/app/node_modules
     environment:
