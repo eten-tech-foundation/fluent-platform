@@ -13,8 +13,9 @@ Set-Location $ScriptDir
 # ── Runtime detection (prefer Podman) ──────────────────────────────────────────
 
 function Get-ComposeCommand {
-    if ((Get-Command podman -ErrorAction SilentlyContinue) -and (Get-Command podman-compose -ErrorAction SilentlyContinue)) {
-        return "podman-compose"
+    if (Get-Command podman -ErrorAction SilentlyContinue) {
+        $v2 = & podman compose version 2>&1
+        if ($LASTEXITCODE -eq 0) { return "podman compose" }
     }
     if (Get-Command docker -ErrorAction SilentlyContinue) {
         $v2 = & docker compose version 2>&1
@@ -23,7 +24,7 @@ function Get-ComposeCommand {
     }
     Write-Error @"
 No container runtime found. Install one of:
-  - Podman + podman-compose
+  - Podman (includes podman compose)
   - Docker Desktop (includes docker compose V2)
   - Docker Engine + docker-compose
 "@
@@ -36,6 +37,8 @@ function Invoke-Compose {
     param([string[]]$ComposeArgs)
     if ($Compose -eq "docker compose") {
         & docker compose @ComposeArgs
+    } elseif ($Compose -eq "podman compose") {
+        & podman compose @ComposeArgs
     } else {
         & $Compose @ComposeArgs
     }

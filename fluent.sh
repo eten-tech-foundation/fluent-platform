@@ -7,8 +7,8 @@ cd "$SCRIPT_DIR"
 # ── Runtime detection (prefer Podman) ──────────────────────────────────────────
 
 detect_runtime() {
-  if command -v podman &>/dev/null && command -v podman-compose &>/dev/null; then
-    COMPOSE_CMD="podman-compose"
+  if command -v podman &>/dev/null && podman compose version &>/dev/null 2>&1; then
+    COMPOSE_CMD="podman compose"
   elif command -v docker &>/dev/null && docker compose version &>/dev/null 2>&1; then
     COMPOSE_CMD="docker compose"
   elif command -v docker &>/dev/null && command -v docker-compose &>/dev/null; then
@@ -16,7 +16,7 @@ detect_runtime() {
   else
     echo "Error: No container runtime found."
     echo "Install one of:"
-    echo "  - Podman + podman-compose"
+    echo "  - Podman (includes podman compose)"
     echo "  - Docker Desktop (includes docker compose V2)"
     echo "  - Docker Engine + docker-compose"
     exit 1
