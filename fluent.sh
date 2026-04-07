@@ -101,7 +101,7 @@ start_db_container() {
     --health-interval 5s \
     --health-timeout 5s \
     --health-retries 5 \
-    postgres:16-alpine
+    docker.io/postgres:16-alpine
 }
 
 start_api_container() {
