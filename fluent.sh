@@ -46,10 +46,10 @@ pod_create() {
   $PODMAN_CMD pod create \
     --name "$POD_NAME" \
     --share \
-    -p "${DB_PORT}:5432" \
-    -p "${API_PORT}:9999" \
-    -p "${AI_PORT}:8200" \
-    -p "${WEB_PORT}:5173"
+    --publish "${DB_PORT}:5432" \
+    --publish "${API_PORT}:9999" \
+    --publish "${AI_PORT}:8200" \
+    --publish "${WEB_PORT}:5173"
 }
 
 pod_destroy() {
