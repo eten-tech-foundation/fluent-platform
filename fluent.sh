@@ -139,11 +139,6 @@ start_api_container() {
     --cap-drop ALL \
     --user 1001:1001 \
     --read-only \
-    --health-cmd "curl -f http://localhost:9999/health" \
-    --health-interval 10s \
-    --health-timeout 5s \
-    --health-retries 5 \
-    --health-start-period 15s \
     fluent-api
 }
 
