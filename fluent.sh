@@ -110,6 +110,13 @@ start_api_container() {
     return
   fi
   
+  # Validate build context
+  if [ ! -d "${API_CONTEXT:-../fluent-api}" ]; then
+    echo "Error: API context not found: ${API_CONTEXT:-../fluent-api}"
+    echo "Please ensure the fluent-api repository is cloned and accessible."
+    exit 1
+  fi
+  
   echo "Building API image..."
   $PODMAN_CMD build -t fluent-api "${API_CONTEXT:-../fluent-api}" -f Dockerfile.dev
   
@@ -173,6 +180,13 @@ start_ai_container() {
     return
   fi
   
+  # Validate build context
+  if [ ! -d "${AI_CONTEXT:-../fluent-ai}" ]; then
+    echo "Error: AI context not found: ${AI_CONTEXT:-../fluent-ai}"
+    echo "Please ensure the fluent-ai repository is cloned and accessible."
+    exit 1
+  fi
+  
   echo "Building AI image..."
   $PODMAN_CMD build -t fluent-ai "${AI_CONTEXT:-../fluent-ai}" -f Dockerfile.dev
   
@@ -202,6 +216,13 @@ start_web_container() {
   if $PODMAN_CMD container exists web 2>/dev/null; then
     echo "Web container already exists"
     return
+  fi
+  
+  # Validate build context
+  if [ ! -d "${WEB_CONTEXT:-../fluent-web}" ]; then
+    echo "Error: Web context not found: ${WEB_CONTEXT:-../fluent-web}"
+    echo "Please ensure the fluent-web repository is cloned and accessible."
+    exit 1
   fi
   
   echo "Building Web image..."
@@ -327,7 +348,11 @@ compose_shell() {
 compose_run() {
   local service="${1:?Usage: fluent.sh run <service> <script>}"
   shift
-  $COMPOSE_CMD exec "$service" npm run "$@"
+  if [ "$service" = "ai" ]; then
+    $COMPOSE_CMD exec "$service" uv run "$@"
+  else
+    $COMPOSE_CMD exec "$service" npm run "$@"
+  fi
 }
 
 compose_test() {
@@ -546,25 +571,25 @@ clean() {
       if [ "$target" = "all" ]; then
         pod_destroy
         $PODMAN_CMD volume rm fluent-pgdata fluent-api-node-modules fluent-worker-node-modules fluent-web-node-modules 2>/dev/null || true
-        rm -f "${API_CONTEXT}/.db-initialized"
-        rm -f "${AI_CONTEXT}/.db-initialized"
+        rm -f "${API_CONTEXT:-../fluent-api}/.db-initialized"
+        rm -f "${AI_CONTEXT:-../fluent-ai}/.db-initialized"
       else
         $PODMAN_CMD rm -f "$target" 2>/dev/null || true
         case "$target" in
-          api|worker) rm -f "${API_CONTEXT}/.db-initialized" ;;
-          ai) rm -f "${AI_CONTEXT}/.db-initialized" ;;
+          api|worker) rm -f "${API_CONTEXT:-../fluent-api}/.db-initialized" ;;
+          ai) rm -f "${AI_CONTEXT:-../fluent-ai}/.db-initialized" ;;
         esac
       fi
     else
       if [ "$target" = "all" ]; then
         $COMPOSE_CMD down -v
-        rm -f "${API_CONTEXT}/.db-initialized"
-        rm -f "${AI_CONTEXT}/.db-initialized"
+        rm -f "${API_CONTEXT:-../fluent-api}/.db-initialized"
+        rm -f "${AI_CONTEXT:-../fluent-ai}/.db-initialized"
       else
         $COMPOSE_CMD rm -sf "$target"
         case "$target" in
-          api|worker) rm -f "${API_CONTEXT}/.db-initialized" ;;
-          ai) rm -f "${AI_CONTEXT}/.db-initialized" ;;
+          api|worker) rm -f "${API_CONTEXT:-../fluent-api}/.db-initialized" ;;
+          ai) rm -f "${AI_CONTEXT:-../fluent-ai}/.db-initialized" ;;
         esac
       fi
     fi
@@ -582,12 +607,12 @@ fresh() {
       pod_destroy
       $PODMAN_CMD volume rm fluent-pgdata fluent-api-node-modules fluent-worker-node-modules fluent-web-node-modules 2>/dev/null || true
       $PODMAN_CMD rmi -f fluent-api fluent-ai fluent-web 2>/dev/null || true
-      rm -f "${API_CONTEXT}/.db-initialized"
-      rm -f "${AI_CONTEXT}/.db-initialized"
+      rm -f "${API_CONTEXT:-../fluent-api}/.db-initialized"
+      rm -f "${AI_CONTEXT:-../fluent-ai}/.db-initialized"
     else
       $COMPOSE_CMD down -v --rmi local --remove-orphans
-      rm -f "${API_CONTEXT}/.db-initialized"
-      rm -f "${AI_CONTEXT}/.db-initialized"
+      rm -f "${API_CONTEXT:-../fluent-api}/.db-initialized"
+      rm -f "${AI_CONTEXT:-../fluent-ai}/.db-initialized"
     fi
     echo ""
     echo "Clean slate. Run './fluent.sh up' to rebuild and start everything."
@@ -599,6 +624,24 @@ fresh() {
 build() {
   if [ "$RUNTIME_MODE" = "podman-pod" ]; then
     echo "Building all images..."
+    
+    # Validate build contexts exist
+    local missing_contexts=()
+    [ ! -d "${API_CONTEXT:-../fluent-api}" ] && missing_contexts+=("API context: ${API_CONTEXT:-../fluent-api}")
+    [ ! -d "${AI_CONTEXT:-../fluent-ai}" ] && missing_contexts+=("AI context: ${AI_CONTEXT:-../fluent-ai}")
+    [ ! -d "${WEB_CONTEXT:-../fluent-web}" ] && missing_contexts+=("Web context: ${WEB_CONTEXT:-../fluent-web}")
+    
+    if [ ${#missing_contexts[@]} -gt 0 ]; then
+      echo "Error: Missing build contexts:"
+      for context in "${missing_contexts[@]}"; do
+        echo "  - $context"
+      done
+      echo ""
+      echo "Please ensure all repositories are cloned and accessible, or run:"
+      echo "  ./fluent.sh setup"
+      exit 1
+    fi
+    
     $PODMAN_CMD build -t fluent-api "${API_CONTEXT:-../fluent-api}" -f Dockerfile.dev
     $PODMAN_CMD build -t fluent-ai "${AI_CONTEXT:-../fluent-ai}" -f Dockerfile.dev
     $PODMAN_CMD build -t fluent-web "${WEB_CONTEXT:-../fluent-web}" -f Dockerfile.dev
@@ -643,7 +686,7 @@ else
 fi
 echo ""
 
-# Repo path helpers ----------------------------------------------------------──────────────────────────────────────────────────────────
+# Repo path helpers ----------------------------------------------------------
 
 API_CONTEXT="${API_CONTEXT:-../fluent-api}"
 AI_CONTEXT="${AI_CONTEXT:-../fluent-ai}"
