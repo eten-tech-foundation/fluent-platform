@@ -10,10 +10,10 @@
 -- SECTION 1: LOGIN USERS
 -- ================================================================
 
-CREATE USER db_admin    WITH PASSWORD 'pa$$word' CREATEROLE;
-CREATE USER migrations  WITH PASSWORD 'pa$$word';
-CREATE USER web_user    WITH PASSWORD 'pa$$word';
-CREATE USER ai_user     WITH PASSWORD 'pa$$word';
+CREATE USER db_admin    WITH PASSWORD 'postgres' CREATEROLE;
+CREATE USER migrations  WITH PASSWORD 'postgres';
+CREATE USER web_user    WITH PASSWORD 'postgres';
+CREATE USER ai_user     WITH PASSWORD 'postgres';
 
 
 -- ================================================================
