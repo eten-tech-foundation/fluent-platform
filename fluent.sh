@@ -110,7 +110,7 @@ start_db_container() {
   
   echo_running "Starting database container..."
   $PODMAN_CMD run -d \
-    --name db \
+    --name fluent_db \
     --pod "$POD_NAME" \
     -e POSTGRES_USER=postgres \
     -e POSTGRES_PASSWORD=postgres \
@@ -143,7 +143,7 @@ start_api_container() {
   
   echo_running "Starting API container..."
   $PODMAN_CMD run -d \
-    --name api \
+    --name fluent_api \
     --pod "$POD_NAME" \
     -e DATABASE_URL=postgres://postgres:postgres@localhost:5432/fluent \
     -e EXPORTS_DIR=/app/exports \
@@ -177,7 +177,7 @@ start_worker_container() {
   
   echo_running "Starting worker container..."
   $PODMAN_CMD run -d \
-    --name worker \
+    --name fluent_worker \
     --pod "$POD_NAME" \
     -e DATABASE_URL=postgres://postgres:postgres@localhost:5432/fluent \
     -e EXPORTS_DIR=/app/exports \
@@ -215,7 +215,7 @@ start_ai_container() {
   
   echo_running "Starting AI container..."
   $PODMAN_CMD run -d \
-    --name ai \
+    --name fluent_ai \
     --pod "$POD_NAME" \
     -e DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/fluent" \
     -e ENVIRONMENT=development \
@@ -254,7 +254,7 @@ start_web_container() {
   
   echo_running "Starting Web container..."
   $PODMAN_CMD run -d \
-    --name web \
+    --name fluent_web \
     --pod "$POD_NAME" \
     -e COREPACK_HOME=/app/.cache/corepack \
     -v "${WEB_CONTEXT:-../fluent-web}/src:/app/src" \
