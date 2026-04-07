@@ -131,7 +131,7 @@ function Wait-Api {
 
 # Service container functions -------------------------------------------------
 function Start-DatabaseContainer {
-    $existing = & $ContainerCmd container exists db 2>$null
+    $existing = & $ContainerCmd container exists fluent_db 2>$null
     if ($LASTEXITCODE -eq 0) {
         Write-Success "Database container already exists"
         return
@@ -153,7 +153,7 @@ function Start-DatabaseContainer {
 }
 
 function Start-ApiContainer {
-    $existing = & $ContainerCmd container exists api 2>$null
+    $existing = & $ContainerCmd container exists fluent_api 2>$null
     if ($LASTEXITCODE -eq 0) {
         Write-Success "API container already exists"
         return
@@ -197,7 +197,7 @@ function Start-ApiContainer {
 }
 
 function Start-WorkerContainer {
-    $existing = & $ContainerCmd container exists worker 2>$null
+    $existing = & $ContainerCmd container exists fluent_worker 2>$null
     if ($LASTEXITCODE -eq 0) {
         Write-Success "Worker container already exists"
         return
@@ -224,7 +224,7 @@ function Start-WorkerContainer {
 }
 
 function Start-AiContainer {
-    $existing = & $ContainerCmd container exists ai 2>$null
+    $existing = & $ContainerCmd container exists fluent_ai 2>$null
     if ($LASTEXITCODE -eq 0) {
         Write-Success "AI container already exists"
         return
@@ -263,7 +263,7 @@ function Start-AiContainer {
 }
 
 function Start-WebContainer {
-    $existing = & $ContainerCmd container exists web 2>$null
+    $existing = & $ContainerCmd container exists fluent_web 2>$null
     if ($LASTEXITCODE -eq 0) {
         Write-Success "Web container already exists"
         return
@@ -344,9 +344,9 @@ function Invoke-PodmanStatus {
 function Invoke-PodmanShell {
     $service = if ($Args.Count -gt 0) { $Args[0] } else { "api" }
     if ($service -eq "db") {
-        & $ContainerCmd exec db psql -U postgres -d fluent
+        & $ContainerCmd exec fluent_db psql -U postgres -d fluent
     } else {
-        & $ContainerCmd exec $service sh
+        & $ContainerCmd exec "fluent_$service" sh
     }
 }
 
@@ -355,9 +355,9 @@ function Invoke-PodmanRun {
     $service = $Args[0]
     $remaining = $Args[1..($Args.Count - 1)]
     if ($service -eq "ai") {
-        & $ContainerCmd exec $service uv run @remaining
+        & $ContainerCmd exec "fluent_$service" uv run @remaining
     } else {
-        & $ContainerCmd exec $service npm run @remaining
+        & $ContainerCmd exec "fluent_$service" npm run @remaining
     }
 }
 
@@ -366,9 +366,9 @@ function Invoke-PodmanTest {
     $service = $Args[0]
     $remaining = if ($Args.Count -gt 1) { $Args[1..($Args.Count - 1)] } else { @() }
     if ($service -eq "ai") {
-        & $ContainerCmd exec ai uv run pytest @remaining
+        & $ContainerCmd exec fluent_ai uv run pytest @remaining
     } else {
-        & $ContainerCmd exec $service npm run test @remaining
+        & $ContainerCmd exec "fluent_$service" npm run test @remaining
     }
 }
 
@@ -433,7 +433,7 @@ switch ($Command) {
             } else {
                 foreach ($service in $Args) {
                     Write-Host "Restarting $service..."
-                    & $ContainerCmd rm -f $service 2>$null | Out-Null
+                    & $ContainerCmd rm -f "fluent_$service" 2>$null | Out-Null
                     switch ($service) {
                         "db" { Start-DatabaseContainer }
                         "api" { Start-ApiContainer }
@@ -507,7 +507,7 @@ switch ($Command) {
             switch ($target) {
                 "api" {
                     Write-Running "Running fluent-api migrations..."
-                    & $ContainerCmd exec api npx drizzle-kit migrate
+                    & $ContainerCmd exec fluent_api npx drizzle-kit migrate
                     Write-Success "API migrations completed"
                 }
                 "ai" {
@@ -518,7 +518,7 @@ switch ($Command) {
                     $confirm = Read-Host "Run migrations for all services? [y/N]"
                     if ($confirm -match "^[Yy]$") {
                         Write-Running "Running fluent-api migrations..."
-                        & $ContainerCmd exec api npx drizzle-kit migrate
+                        & $ContainerCmd exec fluent_api npx drizzle-kit migrate
                         Write-Success "All migrations completed"
                     } else {
                         Write-Host "Aborted."
@@ -571,7 +571,7 @@ switch ($Command) {
             switch ($target) {
                 "api" {
                     Write-Running "Running fluent-api seeds..."
-                    & $ContainerCmd exec api npx tsx src/db/seeds/rbac.ts
+                    & $ContainerCmd exec fluent_api npx tsx src/db/seeds/rbac.ts
                     Write-Success "API seeds completed"
                 }
                 "ai" {
@@ -582,7 +582,7 @@ switch ($Command) {
                     $confirm = Read-Host "Run seeds for all services? [y/N]"
                     if ($confirm -match "^[Yy]$") {
                         Write-Running "Running fluent-api seeds..."
-                        & $ContainerCmd exec api npx tsx src/db/seeds/rbac.ts
+                        & $ContainerCmd exec fluent_api npx tsx src/db/seeds/rbac.ts
                         Write-Success "All seeds completed"
                     } else {
                         Write-Host "Aborted."
@@ -634,8 +634,8 @@ switch ($Command) {
         $confirm = Read-Host "This will run all migrations and seeds. Continue? [y/N]"
         if ($confirm -match "^[Yy]$") {
             if ($RuntimeMode -eq "podman-pod") {
-                & $ContainerCmd exec api npx drizzle-kit migrate
-                & $ContainerCmd exec api npx tsx src/db/seeds/rbac.ts
+                & $ContainerCmd exec fluent_api npx drizzle-kit migrate
+                & $ContainerCmd exec fluent_api npx tsx src/db/seeds/rbac.ts
             } else {
                 & $MyInvocation.MyCommand.Path "db:migrate" "api"
                 & $MyInvocation.MyCommand.Path "db:seed" "api"
@@ -652,7 +652,7 @@ switch ($Command) {
     }
     "db:psql" {
         if ($RuntimeMode -eq "podman-pod") {
-            & $ContainerCmd exec db psql -U postgres -d fluent
+            & $ContainerCmd exec fluent_db psql -U postgres -d fluent
         } else {
             Invoke-Compose @("exec", "db", "psql", "-U", "postgres", "-d", "fluent")
         }
@@ -674,7 +674,7 @@ switch ($Command) {
                     Remove-Item -Force -ErrorAction SilentlyContinue "$aiContext/.db-initialized"
                     Write-Success "All containers and volumes removed"
                 } else {
-                    & $ContainerCmd rm -f $target 2>$null | Out-Null
+                    & $ContainerCmd rm -f "fluent_$target" 2>$null | Out-Null
                     $apiContext = if ($env:API_CONTEXT) { $env:API_CONTEXT } else { "../fluent-api" }
                     $aiContext = if ($env:AI_CONTEXT) { $env:AI_CONTEXT } else { "../fluent-ai" }
                     switch ($target) {

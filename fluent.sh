@@ -126,7 +126,7 @@ start_db_container() {
 }
 
 start_api_container() {
-  if $PODMAN_CMD container exists api 2>/dev/null; then
+  if $PODMAN_CMD container exists fluent_api 2>/dev/null; then
     echo_success "API container already exists"
     return
   fi
@@ -170,7 +170,7 @@ start_api_container() {
 }
 
 start_worker_container() {
-  if $PODMAN_CMD container exists worker 2>/dev/null; then
+  if $PODMAN_CMD container exists fluent_worker 2>/dev/null; then
     echo_success "Worker container already exists"
     return
   fi
@@ -198,7 +198,7 @@ start_worker_container() {
 }
 
 start_ai_container() {
-  if $PODMAN_CMD container exists ai 2>/dev/null; then
+  if $PODMAN_CMD container exists fluent_ai 2>/dev/null; then
     echo_success "AI container already exists"
     return
   fi
@@ -237,7 +237,7 @@ start_ai_container() {
 }
 
 start_web_container() {
-  if $PODMAN_CMD container exists web 2>/dev/null; then
+  if $PODMAN_CMD container exists fluent_web 2>/dev/null; then
     echo_success "Web container already exists"
     return
   fi
@@ -318,9 +318,9 @@ podman_status() {
 podman_shell() {
   local service="${1:-api}"
   if [ "$service" = "db" ]; then
-    $PODMAN_CMD exec db psql -U postgres -d fluent
+    $PODMAN_CMD exec fluent_db psql -U postgres -d fluent
   else
-    $PODMAN_CMD exec "$service" sh
+    $PODMAN_CMD exec "fluent_$service" sh
   fi
 }
 
@@ -328,9 +328,9 @@ podman_run() {
   local service="${1:?Usage: fluent.sh run <service> <script>}"
   shift
   if [ "$service" = "ai" ]; then
-    $PODMAN_CMD exec "$service" uv run "$@"
+    $PODMAN_CMD exec "fluent_$service" uv run "$@"
   else
-    $PODMAN_CMD exec "$service" npm run "$@"
+    $PODMAN_CMD exec "fluent_$service" npm run "$@"
   fi
 }
 
@@ -338,9 +338,9 @@ podman_test() {
   local service="${1:?Usage: fluent.sh test <service>}"
   shift
   if [ "$service" = "ai" ]; then
-    $PODMAN_CMD exec ai uv run pytest "$@"
+    $PODMAN_CMD exec fluent_ai uv run pytest "$@"
   else
-    $PODMAN_CMD exec "$service" npm run test "$@"
+    $PODMAN_CMD exec "fluent_$service" npm run test "$@"
   fi
 }
 
@@ -454,7 +454,7 @@ db_migrate() {
     case "$target" in
       api)
         echo_running "Running fluent-api migrations..."
-        $PODMAN_CMD exec api npx drizzle-kit migrate
+        $PODMAN_CMD exec fluent_api npx drizzle-kit migrate
         echo_success "API migrations completed"
         ;;
       ai)
@@ -465,7 +465,7 @@ db_migrate() {
         read -rp "Run migrations for all services? [y/N] " confirm
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
           echo_running "Running fluent-api migrations..."
-          $PODMAN_CMD exec api npx drizzle-kit migrate
+          $PODMAN_CMD exec fluent_api npx drizzle-kit migrate
           echo_success "All migrations completed"
         else
           echo "Aborted."
@@ -519,7 +519,7 @@ db_seed() {
     case "$target" in
       api)
         echo_running "Running fluent-api seeds..."
-        $PODMAN_CMD exec api npx tsx src/db/seeds/rbac.ts
+        $PODMAN_CMD exec fluent_api npx tsx src/db/seeds/rbac.ts
         echo_success "API seeds completed"
         ;;
       ai)
@@ -530,7 +530,7 @@ db_seed() {
         read -rp "Run seeds for all services? [y/N] " confirm
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
           echo_running "Running fluent-api seeds..."
-          $PODMAN_CMD exec api npx tsx src/db/seeds/rbac.ts
+          $PODMAN_CMD exec fluent_api npx tsx src/db/seeds/rbac.ts
           echo_success "All seeds completed"
         else
           echo "Aborted."
@@ -592,7 +592,7 @@ db_init() {
 
 db_psql() {
   if [ "$RUNTIME_MODE" = "podman-pod" ]; then
-    $PODMAN_CMD exec db psql -U postgres -d fluent
+    $PODMAN_CMD exec fluent_db psql -U postgres -d fluent
   else
     $COMPOSE_CMD exec db psql -U postgres -d fluent
   fi
@@ -612,7 +612,7 @@ clean() {
         rm -f "${AI_CONTEXT:-../fluent-ai}/.db-initialized"
         echo_success "All containers and volumes removed"
       else
-        $PODMAN_CMD rm -f "$target" 2>/dev/null || true
+        $PODMAN_CMD rm -f "fluent_$target" 2>/dev/null || true
         case "$target" in
           api|worker) rm -f "${API_CONTEXT:-../fluent-api}/.db-initialized" ;;
           ai) rm -f "${AI_CONTEXT:-../fluent-ai}/.db-initialized" ;;
@@ -748,7 +748,7 @@ restart() {
     else
       for service in "${services[@]}"; do
         echo_running "Restarting $service..."
-        $PODMAN_CMD rm -f "$service" 2>/dev/null || true
+        $PODMAN_CMD rm -f "fluent_$service" 2>/dev/null || true
         case "$service" in
           db) start_db_container ;;
           api) start_api_container ;;
