@@ -45,11 +45,7 @@ pod_create() {
   echo "Creating pod $POD_NAME..."
   $PODMAN_CMD pod create \
     --name "$POD_NAME" \
-    --share \
-    --publish "${DB_PORT}:5432" \
-    --publish "${API_PORT}:9999" \
-    --publish "${AI_PORT}:8200" \
-    --publish "${WEB_PORT}:5173"
+    --share
 }
 
 pod_destroy() {
@@ -92,6 +88,7 @@ start_db_container() {
   $PODMAN_CMD run -d \
     --name db \
     --pod "$POD_NAME" \
+    -p "${DB_PORT}:5432" \
     -e POSTGRES_USER=postgres \
     -e POSTGRES_PASSWORD=postgres \
     -e POSTGRES_DB=fluent \
@@ -124,6 +121,7 @@ start_api_container() {
   $PODMAN_CMD run -d \
     --name api \
     --pod "$POD_NAME" \
+    -p "${API_PORT}:9999" \
     -e DATABASE_URL=postgres://postgres:postgres@localhost:5432/fluent \
     -e EXPORTS_DIR=/app/exports \
     --env-file "${API_CONTEXT:-../fluent-api}/.env" \
@@ -189,6 +187,7 @@ start_ai_container() {
   $PODMAN_CMD run -d \
     --name ai \
     --pod "$POD_NAME" \
+    -p "${AI_PORT}:8200" \
     -e DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/fluent" \
     -e ENVIRONMENT=development \
     -e DEBUG=true \
@@ -227,6 +226,7 @@ start_web_container() {
   $PODMAN_CMD run -d \
     --name web \
     --pod "$POD_NAME" \
+    -p "${WEB_PORT}:5173" \
     -e COREPACK_HOME=/app/.cache/corepack \
     -v "${WEB_CONTEXT:-../fluent-web}/src:/app/src" \
     -v "${WEB_CONTEXT:-../fluent-web}/public:/app/public:ro" \
