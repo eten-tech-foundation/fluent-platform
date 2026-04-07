@@ -45,7 +45,7 @@ pod_create() {
   echo "Creating pod $POD_NAME..."
   $PODMAN_CMD pod create \
     --name "$POD_NAME" \
-    --share \
+    --share "net,ipc,uts" \
     -p "${DB_PORT}:5432" \
     -p "${API_PORT}:9999" \
     -p "${AI_PORT}:8200" \
@@ -622,14 +622,35 @@ fresh() {
 }
 
 build() {
+  local services=("$@")
+  
   if [ "$RUNTIME_MODE" = "podman-pod" ]; then
-    echo "Building all images..."
+    if [ ${#services[@]} -eq 0 ]; then
+      echo "Building all images..."
+      services=("api" "ai" "web")
+    else
+      echo "Building specified services: ${services[*]}"
+    fi
     
-    # Validate build contexts exist
+    # Validate build contexts exist for requested services
     local missing_contexts=()
-    [ ! -d "${API_CONTEXT:-../fluent-api}" ] && missing_contexts+=("API context: ${API_CONTEXT:-../fluent-api}")
-    [ ! -d "${AI_CONTEXT:-../fluent-ai}" ] && missing_contexts+=("AI context: ${AI_CONTEXT:-../fluent-ai}")
-    [ ! -d "${WEB_CONTEXT:-../fluent-web}" ] && missing_contexts+=("Web context: ${WEB_CONTEXT:-../fluent-web}")
+    for service in "${services[@]}"; do
+      case "$service" in
+        api)
+          [ ! -d "${API_CONTEXT:-../fluent-api}" ] && missing_contexts+=("API context: ${API_CONTEXT:-../fluent-api}")
+          ;;
+        ai)
+          [ ! -d "${AI_CONTEXT:-../fluent-ai}" ] && missing_contexts+=("AI context: ${AI_CONTEXT:-../fluent-ai}")
+          ;;
+        web)
+          [ ! -d "${WEB_CONTEXT:-../fluent-web}" ] && missing_contexts+=("Web context: ${WEB_CONTEXT:-../fluent-web}")
+          ;;
+        *)
+          echo "Error: Unknown service '$service' (use: api, ai, web)"
+          exit 1
+          ;;
+      esac
+    done
     
     if [ ${#missing_contexts[@]} -gt 0 ]; then
       echo "Error: Missing build contexts:"
@@ -642,11 +663,29 @@ build() {
       exit 1
     fi
     
-    $PODMAN_CMD build -t fluent-api "${API_CONTEXT:-../fluent-api}" -f Dockerfile.dev
-    $PODMAN_CMD build -t fluent-ai "${AI_CONTEXT:-../fluent-ai}" -f Dockerfile.dev
-    $PODMAN_CMD build -t fluent-web "${WEB_CONTEXT:-../fluent-web}" -f Dockerfile.dev
+    # Build requested services
+    for service in "${services[@]}"; do
+      case "$service" in
+        api)
+          echo "Building API image..."
+          $PODMAN_CMD build -t fluent-api "${API_CONTEXT:-../fluent-api}" -f Dockerfile.dev
+          ;;
+        ai)
+          echo "Building AI image..."
+          $PODMAN_CMD build -t fluent-ai "${AI_CONTEXT:-../fluent-ai}" -f Dockerfile.dev
+          ;;
+        web)
+          echo "Building Web image..."
+          $PODMAN_CMD build -t fluent-web "${WEB_CONTEXT:-../fluent-web}" -f Dockerfile.dev
+          ;;
+      esac
+    done
   else
-    $COMPOSE_CMD build --no-cache "$@"
+    if [ ${#services[@]} -eq 0 ]; then
+      $COMPOSE_CMD build --no-cache
+    else
+      $COMPOSE_CMD build --no-cache "$@"
+    fi
   fi
 }
 
