@@ -28,6 +28,24 @@ detect_runtime() {
 
 detect_runtime
 
+# Color helpers -----------------------------------------------------------------
+YELLOW='\033[1;33m'
+GREEN='\033[1;32m'
+RED='\033[1;31m'
+NC='\033[0m' # No Color
+
+echo_running() {
+  echo -e "${YELLOW}>>> $1${NC}"
+}
+
+echo_success() {
+  echo -e "${GREEN}>>> $1${NC}"
+}
+
+echo_error() {
+  echo -e "${RED}>>> $1${NC}"
+}
+
 # Podman pod configuration ----------------------------------------------------
 POD_NAME="fluent-platform"
 DB_PORT="${DB_PORT:-5432}"
@@ -38,11 +56,11 @@ WEB_PORT="${WEB_PORT:-5173}"
 # Pod management functions ----------------------------------------------------
 pod_create() {
   if $PODMAN_CMD pod exists "$POD_NAME" 2>/dev/null; then
-    echo "Pod $POD_NAME already exists"
+    echo_success "Pod $POD_NAME already exists"
     return
   fi
   
-  echo "Creating pod $POD_NAME..."
+  echo_running "Creating pod $POD_NAME..."
   $PODMAN_CMD pod create \
     --name "$POD_NAME" \
     --share "net,ipc,uts" \
@@ -54,13 +72,13 @@ pod_create() {
 
 pod_destroy() {
   if $PODMAN_CMD pod exists "$POD_NAME" 2>/dev/null; then
-    echo "Removing pod $POD_NAME..."
+    echo_running "Removing pod $POD_NAME..."
     $PODMAN_CMD pod rm "$POD_NAME" -f
   fi
 }
 
 create_volumes() {
-  echo "Creating volumes..."
+  echo_running "Creating volumes..."
   $PODMAN_CMD volume create fluent-pgdata 2>/dev/null || true
   $PODMAN_CMD volume create fluent-api-node-modules 2>/dev/null || true
   $PODMAN_CMD volume create fluent-worker-node-modules 2>/dev/null || true
@@ -68,27 +86,29 @@ create_volumes() {
 }
 
 wait_for_db() {
-  echo "Waiting for database to be ready..."
+  echo_running "Waiting for database to be ready..."
   while ! $PODMAN_CMD exec db pg_isready -U postgres -d fluent 2>/dev/null; do
     sleep 2
   done
+  echo_success "Database is ready"
 }
 
 wait_for_api() {
-  echo "Waiting for API to be ready..."
+  echo_running "Waiting for API to be ready..."
   while ! curl -f http://localhost:${API_PORT}/health 2>/dev/null; do
     sleep 2
   done
+  echo_success "API is ready"
 }
 
 # Service container functions -------------------------------------------------
 start_db_container() {
   if $PODMAN_CMD container exists db 2>/dev/null; then
-    echo "Database container already exists"
+    echo_success "Database container already exists"
     return
   fi
   
-  echo "Starting database container..."
+  echo_running "Starting database container..."
   $PODMAN_CMD run -d \
     --name db \
     --pod "$POD_NAME" \
@@ -102,25 +122,26 @@ start_db_container() {
     --health-timeout 5s \
     --health-retries 5 \
     docker.io/postgres:16-alpine
+  echo_success "Database container started"
 }
 
 start_api_container() {
   if $PODMAN_CMD container exists api 2>/dev/null; then
-    echo "API container already exists"
+    echo_success "API container already exists"
     return
   fi
   
   # Validate build context
   if [ ! -d "${API_CONTEXT:-../fluent-api}" ]; then
-    echo "Error: API context not found: ${API_CONTEXT:-../fluent-api}"
-    echo "Please ensure the fluent-api repository is cloned and accessible."
+    echo_error "API context not found: ${API_CONTEXT:-../fluent-api}"
+    echo_error "Please ensure the fluent-api repository is cloned and accessible."
     exit 1
   fi
   
-  echo "Building API image..."
+  echo_running "Building API image..."
   $PODMAN_CMD build -t fluent-api "${API_CONTEXT:-../fluent-api}" -f Dockerfile.dev
   
-  echo "Starting API container..."
+  echo_running "Starting API container..."
   $PODMAN_CMD run -d \
     --name api \
     --pod "$POD_NAME" \
@@ -145,15 +166,16 @@ start_api_container() {
     --health-retries 5 \
     --health-start-period 15s \
     fluent-api
+  echo_success "API container started"
 }
 
 start_worker_container() {
   if $PODMAN_CMD container exists worker 2>/dev/null; then
-    echo "Worker container already exists"
+    echo_success "Worker container already exists"
     return
   fi
   
-  echo "Starting worker container..."
+  echo_running "Starting worker container..."
   $PODMAN_CMD run -d \
     --name worker \
     --pod "$POD_NAME" \
@@ -172,25 +194,26 @@ start_worker_container() {
     --read-only \
     fluent-api \
     dumb-init -- npx tsx watch src/workers/standalone-worker.ts
+  echo_success "Worker container started"
 }
 
 start_ai_container() {
   if $PODMAN_CMD container exists ai 2>/dev/null; then
-    echo "AI container already exists"
+    echo_success "AI container already exists"
     return
   fi
   
   # Validate build context
   if [ ! -d "${AI_CONTEXT:-../fluent-ai}" ]; then
-    echo "Error: AI context not found: ${AI_CONTEXT:-../fluent-ai}"
-    echo "Please ensure the fluent-ai repository is cloned and accessible."
+    echo_error "AI context not found: ${AI_CONTEXT:-../fluent-ai}"
+    echo_error "Please ensure the fluent-ai repository is cloned and accessible."
     exit 1
   fi
   
-  echo "Building AI image..."
+  echo_running "Building AI image..."
   $PODMAN_CMD build -t fluent-ai "${AI_CONTEXT:-../fluent-ai}" -f Dockerfile.dev
   
-  echo "Starting AI container..."
+  echo_running "Starting AI container..."
   $PODMAN_CMD run -d \
     --name ai \
     --pod "$POD_NAME" \
@@ -210,25 +233,26 @@ start_ai_container() {
     --user 1001:1001 \
     --read-only \
     fluent-ai
+  echo_success "AI container started"
 }
 
 start_web_container() {
   if $PODMAN_CMD container exists web 2>/dev/null; then
-    echo "Web container already exists"
+    echo_success "Web container already exists"
     return
   fi
   
   # Validate build context
   if [ ! -d "${WEB_CONTEXT:-../fluent-web}" ]; then
-    echo "Error: Web context not found: ${WEB_CONTEXT:-../fluent-web}"
-    echo "Please ensure the fluent-web repository is cloned and accessible."
+    echo_error "Web context not found: ${WEB_CONTEXT:-../fluent-web}"
+    echo_error "Please ensure the fluent-web repository is cloned and accessible."
     exit 1
   fi
   
-  echo "Building Web image..."
+  echo_running "Building Web image..."
   $PODMAN_CMD build -t fluent-web "${WEB_CONTEXT:-../fluent-web}" -f Dockerfile.dev
   
-  echo "Starting Web container..."
+  echo_running "Starting Web container..."
   $PODMAN_CMD run -d \
     --name web \
     --pod "$POD_NAME" \
@@ -249,11 +273,12 @@ start_web_container() {
     --cap-drop ALL \
     --user 1001:1001 \
     fluent-web
+  echo_success "Web container started"
 }
 
 # Podman-specific command functions -------------------------------------------
 podman_up() {
-  echo "Starting services with Podman pods..."
+  echo_running "Starting services with Podman pods..."
   create_volumes
   pod_create
   start_db_container
@@ -263,13 +288,13 @@ podman_up() {
   start_worker_container
   start_ai_container
   start_web_container
-  echo "All services started!"
+  echo_success "All services started!"
 }
 
 podman_down() {
-  echo "Stopping services..."
+  echo_running "Stopping services..."
   pod_destroy
-  echo "Services stopped."
+  echo_success "Services stopped."
 }
 
 podman_logs() {
@@ -428,54 +453,60 @@ db_migrate() {
   if [ "$RUNTIME_MODE" = "podman-pod" ]; then
     case "$target" in
       api)
-        echo "Running fluent-api migrations..."
+        echo_running "Running fluent-api migrations..."
         $PODMAN_CMD exec api npx drizzle-kit migrate
+        echo_success "API migrations completed"
         ;;
       ai)
-        echo "Running fluent-ai migrations..."
+        echo_running "Running fluent-ai migrations..."
         echo "  (no migrations configured yet)"
         ;;
       all)
         read -rp "Run migrations for all services? [y/N] " confirm
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
+          echo_running "Running fluent-api migrations..."
           $PODMAN_CMD exec api npx drizzle-kit migrate
+          echo_success "All migrations completed"
         else
           echo "Aborted."
         fi
         ;;
       web|db)
-        echo "The $target service does not have its own migrations."
+        echo_error "The $target service does not have its own migrations."
         exit 1
         ;;
       *)
-        echo "Unknown migrate target: $target (use api, ai, or all)"
+        echo_error "Unknown migrate target: $target (use api, ai, or all)"
         exit 1
         ;;
     esac
   else
     case "$target" in
       api)
-        echo "Running fluent-api migrations..."
+        echo_running "Running fluent-api migrations..."
         $COMPOSE_CMD exec api npx drizzle-kit migrate
+        echo_success "API migrations completed"
         ;;
       ai)
-        echo "Running fluent-ai migrations..."
+        echo_running "Running fluent-ai migrations..."
         echo "  (no migrations configured yet)"
         ;;
       all)
         read -rp "Run migrations for all services? [y/N] " confirm
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
+          echo_running "Running fluent-api migrations..."
           $COMPOSE_CMD exec api npx drizzle-kit migrate
+          echo_success "All migrations completed"
         else
           echo "Aborted."
         fi
         ;;
       web|db)
-        echo "The $target service does not have its own migrations."
+        echo_error "The $target service does not have its own migrations."
         exit 1
         ;;
       *)
-        echo "Unknown migrate target: $target (use api, ai, or all)"
+        echo_error "Unknown migrate target: $target (use api, ai, or all)"
         exit 1
         ;;
     esac
@@ -487,54 +518,60 @@ db_seed() {
   if [ "$RUNTIME_MODE" = "podman-pod" ]; then
     case "$target" in
       api)
-        echo "Running fluent-api seeds..."
+        echo_running "Running fluent-api seeds..."
         $PODMAN_CMD exec api npx tsx src/db/seeds/rbac.ts
+        echo_success "API seeds completed"
         ;;
       ai)
-        echo "Running fluent-ai seeds..."
+        echo_running "Running fluent-ai seeds..."
         echo "  (no seeds configured yet)"
         ;;
       all)
         read -rp "Run seeds for all services? [y/N] " confirm
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
+          echo_running "Running fluent-api seeds..."
           $PODMAN_CMD exec api npx tsx src/db/seeds/rbac.ts
+          echo_success "All seeds completed"
         else
           echo "Aborted."
         fi
         ;;
       web|db)
-        echo "The $target service does not have its own seeds."
+        echo_error "The $target service does not have its own seeds."
         exit 1
         ;;
       *)
-        echo "Unknown seed target: $target (use api, ai, or all)"
+        echo_error "Unknown seed target: $target (use api, ai, or all)"
         exit 1
         ;;
     esac
   else
     case "$target" in
       api)
-        echo "Running fluent-api seeds..."
+        echo_running "Running fluent-api seeds..."
         $COMPOSE_CMD exec api npx tsx src/db/seeds/rbac.ts
+        echo_success "API seeds completed"
         ;;
       ai)
-        echo "Running fluent-ai seeds..."
+        echo_running "Running fluent-ai seeds..."
         echo "  (no seeds configured yet)"
         ;;
       all)
         read -rp "Run seeds for all services? [y/N] " confirm
         if [[ "$confirm" =~ ^[Yy]$ ]]; then
+          echo_running "Running fluent-api seeds..."
           $COMPOSE_CMD exec api npx tsx src/db/seeds/rbac.ts
+          echo_success "All seeds completed"
         else
           echo "Aborted."
         fi
         ;;
       web|db)
-        echo "The $target service does not have its own seeds."
+        echo_error "The $target service does not have its own seeds."
         exit 1
         ;;
       *)
-        echo "Unknown seed target: $target (use api, ai, or all)"
+        echo_error "Unknown seed target: $target (use api, ai, or all)"
         exit 1
         ;;
     esac
@@ -542,12 +579,12 @@ db_seed() {
 }
 
 db_init() {
-  echo "Full database initialization (migrations + seeds)..."
+  echo_running "Full database initialization (migrations + seeds)..."
   read -rp "This will run all migrations and seeds. Continue? [y/N] " confirm
   if [[ "$confirm" =~ ^[Yy]$ ]]; then
     db_migrate api
     db_seed api
-    echo "Database initialization complete."
+    echo_success "Database initialization complete."
   else
     echo "Aborted."
   fi
@@ -564,7 +601,7 @@ db_psql() {
 # Runtime-specific lifecycle commands -------------------------------------------
 clean() {
   local target="${1:-all}"
-  echo "This will remove containers AND volumes (full DB reset)."
+  echo_running "This will remove containers AND volumes (full DB reset)."
   read -rp "Continue? [y/N] " confirm
   if [[ "$confirm" =~ ^[Yy]$ ]]; then
     if [ "$RUNTIME_MODE" = "podman-pod" ]; then
@@ -573,24 +610,28 @@ clean() {
         $PODMAN_CMD volume rm fluent-pgdata fluent-api-node-modules fluent-worker-node-modules fluent-web-node-modules 2>/dev/null || true
         rm -f "${API_CONTEXT:-../fluent-api}/.db-initialized"
         rm -f "${AI_CONTEXT:-../fluent-ai}/.db-initialized"
+        echo_success "All containers and volumes removed"
       else
         $PODMAN_CMD rm -f "$target" 2>/dev/null || true
         case "$target" in
           api|worker) rm -f "${API_CONTEXT:-../fluent-api}/.db-initialized" ;;
           ai) rm -f "${AI_CONTEXT:-../fluent-ai}/.db-initialized" ;;
         esac
+        echo_success "$target container and related data removed"
       fi
     else
       if [ "$target" = "all" ]; then
         $COMPOSE_CMD down -v
         rm -f "${API_CONTEXT:-../fluent-api}/.db-initialized"
         rm -f "${AI_CONTEXT:-../fluent-ai}/.db-initialized"
+        echo_success "All containers and volumes removed"
       else
         $COMPOSE_CMD rm -sf "$target"
         case "$target" in
           api|worker) rm -f "${API_CONTEXT:-../fluent-api}/.db-initialized" ;;
           ai) rm -f "${AI_CONTEXT:-../fluent-ai}/.db-initialized" ;;
         esac
+        echo_success "$target container and related data removed"
       fi
     fi
   else
@@ -599,8 +640,8 @@ clean() {
 }
 
 fresh() {
-  echo "This will destroy ALL containers, volumes, and images for this project."
-  echo "The database will be wiped and everything will be rebuilt from scratch."
+  echo_running "This will destroy ALL containers, volumes, and images for this project."
+  echo_running "The database will be wiped and everything will be rebuilt from scratch."
   read -rp "Continue? [y/N] " confirm
   if [[ "$confirm" =~ ^[Yy]$ ]]; then
     if [ "$RUNTIME_MODE" = "podman-pod" ]; then
@@ -615,7 +656,7 @@ fresh() {
       rm -f "${AI_CONTEXT:-../fluent-ai}/.db-initialized"
     fi
     echo ""
-    echo "Clean slate. Run './fluent.sh up' to rebuild and start everything."
+    echo_success "Clean slate. Run './fluent.sh up' to rebuild and start everything."
   else
     echo "Aborted."
   fi
@@ -626,10 +667,10 @@ build() {
   
   if [ "$RUNTIME_MODE" = "podman-pod" ]; then
     if [ ${#services[@]} -eq 0 ]; then
-      echo "Building all images..."
+      echo_running "Building all images..."
       services=("api" "ai" "web")
     else
-      echo "Building specified services: ${services[*]}"
+      echo_running "Building specified services: ${services[*]}"
     fi
     
     # Validate build contexts exist for requested services
@@ -646,14 +687,14 @@ build() {
           [ ! -d "${WEB_CONTEXT:-../fluent-web}" ] && missing_contexts+=("Web context: ${WEB_CONTEXT:-../fluent-web}")
           ;;
         *)
-          echo "Error: Unknown service '$service' (use: api, ai, web)"
+          echo_error "Unknown service '$service' (use: api, ai, web)"
           exit 1
           ;;
       esac
     done
     
     if [ ${#missing_contexts[@]} -gt 0 ]; then
-      echo "Error: Missing build contexts:"
+      echo_error "Missing build contexts:"
       for context in "${missing_contexts[@]}"; do
         echo "  - $context"
       done
@@ -667,25 +708,32 @@ build() {
     for service in "${services[@]}"; do
       case "$service" in
         api)
-          echo "Building API image..."
+          echo_running "Building API image..."
           $PODMAN_CMD build -t fluent-api "${API_CONTEXT:-../fluent-api}" -f Dockerfile.dev
+          echo_success "API image built successfully"
           ;;
         ai)
-          echo "Building AI image..."
+          echo_running "Building AI image..."
           $PODMAN_CMD build -t fluent-ai "${AI_CONTEXT:-../fluent-ai}" -f Dockerfile.dev
+          echo_success "AI image built successfully"
           ;;
         web)
-          echo "Building Web image..."
+          echo_running "Building Web image..."
           $PODMAN_CMD build -t fluent-web "${WEB_CONTEXT:-../fluent-web}" -f Dockerfile.dev
+          echo_success "Web image built successfully"
           ;;
       esac
     done
+    echo_success "Build process completed"
   else
     if [ ${#services[@]} -eq 0 ]; then
+      echo_running "Building all Docker Compose services..."
       $COMPOSE_CMD build --no-cache
     else
+      echo_running "Building specified Docker Compose services: ${services[*]}"
       $COMPOSE_CMD build --no-cache "$@"
     fi
+    echo_success "Docker Compose build completed"
   fi
 }
 
@@ -694,12 +742,12 @@ restart() {
   if [ "$RUNTIME_MODE" = "podman-pod" ]; then
     local services=("$@")
     if [ ${#services[@]} -eq 0 ]; then
-      echo "Restarting all services..."
+      echo_running "Restarting all services..."
       pod_destroy
       podman_up
     else
       for service in "${services[@]}"; do
-        echo "Restarting $service..."
+        echo_running "Restarting $service..."
         $PODMAN_CMD rm -f "$service" 2>/dev/null || true
         case "$service" in
           db) start_db_container ;;
@@ -707,12 +755,15 @@ restart() {
           worker) start_worker_container ;;
           ai) start_ai_container ;;
           web) start_web_container ;;
-          *) echo "Unknown service: $service" ;;
+          *) echo_error "Unknown service: $service" ;;
         esac
       done
+      echo_success "Restarted services: ${services[*]}"
     fi
   else
+    echo_running "Restarting Docker Compose services..."
     $COMPOSE_CMD restart "$@"
+    echo_success "Docker Compose services restarted"
   fi
 }
 
