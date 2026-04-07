@@ -47,7 +47,7 @@ echo_error() {
 }
 
 # Podman pod configuration ----------------------------------------------------
-POD_NAME="fluent-platform"
+POD_NAME="fluent"
 DB_PORT="${DB_PORT:-5432}"
 API_PORT="${API_PORT:-9999}"
 AI_PORT="${AI_PORT:-8200}"
@@ -268,7 +268,7 @@ start_web_container() {
     -v "${WEB_CONTEXT:-../fluent-web}/.env:/app/.env:ro" \
     -v fluent-web-node-modules:/app/node_modules \
     --tmpfs /tmp:nosuid,size=64m \
-    --tmpfs /app/.cache:noexec,nosuid,uid=1001,gid=1001,size=128m \
+    --tmpfs /app/.cache:noexec,nosuid,size=128m \
     --security-opt no-new-privileges:true \
     --cap-drop ALL \
     --user 1001:1001 \
