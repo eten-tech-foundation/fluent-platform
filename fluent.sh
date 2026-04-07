@@ -87,7 +87,7 @@ create_volumes() {
 
 wait_for_db() {
   echo_running "Waiting for database to be ready..."
-  while ! $PODMAN_CMD exec db pg_isready -U postgres -d fluent 2>/dev/null; do
+  while ! $PODMAN_CMD exec fluent_db pg_isready -U postgres -d fluent 2>/dev/null; do
     sleep 2
   done
   echo_success "Database is ready"

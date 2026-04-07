@@ -111,7 +111,7 @@ function Wait-Database {
     Write-Running "Waiting for database to be ready..."
     do {
         Start-Sleep -Seconds 2
-        & $ContainerCmd exec db pg_isready -U postgres -d fluent 2>$null | Out-Null
+        & $ContainerCmd exec fluent_db pg_isready -U postgres -d fluent 2>$null | Out-Null
     } while ($LASTEXITCODE -ne 0)
     Write-Success "Database is ready"
 }
