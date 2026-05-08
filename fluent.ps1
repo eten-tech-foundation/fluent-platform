@@ -10,28 +10,19 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ScriptDir
 
-# ── Runtime detection (prefer native Podman pods) ──────────────────────────────────────────
+# ── Runtime detection ─────────────────────────────────────────────────────────
 
 function Get-RuntimeMode {
     if (Get-Command podman -ErrorAction SilentlyContinue) {
-        return @{
-            Mode = "podman-pod"
-            Command = "podman"
-        }
+        return @{ Mode = "podman-pod"; Command = "podman" }
     }
     if (Get-Command docker -ErrorAction SilentlyContinue) {
         $v2 = & docker compose version 2>&1
-        if ($LASTEXITCODE -eq 0) { 
-            return @{
-                Mode = "docker-compose"
-                Command = "docker compose"
-            }
+        if ($LASTEXITCODE -eq 0) {
+            return @{ Mode = "docker-compose"; Command = "docker compose" }
         }
-        if (Get-Command docker-compose -ErrorAction SilentlyContinue) { 
-            return @{
-                Mode = "docker-compose"
-                Command = "docker-compose"
-            }
+        if (Get-Command docker-compose -ErrorAction SilentlyContinue) {
+            return @{ Mode = "docker-compose"; Command = "docker-compose" }
         }
     }
     Write-Error @"
@@ -47,342 +38,24 @@ $Runtime = Get-RuntimeMode
 $RuntimeMode = $Runtime.Mode
 $ContainerCmd = $Runtime.Command
 
-# Color helpers -----------------------------------------------------------------
+# ── Colors ────────────────────────────────────────────────────────────────────
+
 $Yellow = "`e[1;33m"
 $Green = "`e[1;32m"
 $Red = "`e[1;31m"
 $NoColor = "`e[0m"
 
-function Write-Running {
-    param([string]$Message)
-    Write-Host "${Yellow}>>> $Message${NoColor}"
-}
+function Write-Running { param([string]$Message) Write-Host "${Yellow}>>> $Message${NoColor}" }
+function Write-Success  { param([string]$Message) Write-Host "${Green}>>> $Message${NoColor}" }
+function Write-Error-Color { param([string]$Message) Write-Host "${Red}>>> $Message${NoColor}" }
 
-function Write-Success {
-    param([string]$Message)
-    Write-Host "${Green}>>> $Message${NoColor}"
-}
+# ── Configuration ─────────────────────────────────────────────────────────────
 
-function Write-Error-Color {
-    param([string]$Message)
-    Write-Host "${Red}>>> $Message${NoColor}"
-}
-
-# Podman pod configuration ----------------------------------------------------
 $PodName = "fluent"
-$DbPort = if ($env:DB_PORT) { $env:DB_PORT } else { "5432" }
-$ApiPort = if ($env:API_PORT) { $env:API_PORT } else { "9999" }
-$AiPort = if ($env:AI_PORT) { $env:AI_PORT } else { "8200" }
-$WebPort = if ($env:WEB_PORT) { $env:WEB_PORT } else { "5173" }
-
-# Pod management functions ----------------------------------------------------
-function New-Pod {
-    $existing = & $ContainerCmd pod exists $PodName 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Success "Pod $PodName already exists"
-        return
-    }
-    
-    Write-Running "Creating pod $PodName..."
-    & $ContainerCmd pod create --name $PodName --share "net,ipc,uts" `
-        -p "${DbPort}:5432" `
-        -p "${ApiPort}:9999" `
-        -p "${AiPort}:8200" `
-        -p "${WebPort}:5173"
-}
-
-function Remove-Pod {
-    $existing = & $ContainerCmd pod exists $PodName 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Running "Removing pod $PodName..."
-        & $ContainerCmd pod rm $PodName -f
-    }
-}
-
-function New-Volumes {
-    Write-Running "Creating volumes..."
-    & $ContainerCmd volume create fluent-pgdata 2>$null | Out-Null
-    & $ContainerCmd volume create fluent-api-node-modules 2>$null | Out-Null
-    & $ContainerCmd volume create fluent-worker-node-modules 2>$null | Out-Null
-    & $ContainerCmd volume create fluent-web-node-modules 2>$null | Out-Null
-}
-
-function Wait-Database {
-    Write-Running "Waiting for database to be ready..."
-    do {
-        Start-Sleep -Seconds 2
-        & $ContainerCmd exec fluent_db pg_isready -U postgres -d fluent 2>$null | Out-Null
-    } while ($LASTEXITCODE -ne 0)
-    Write-Success "Database is ready"
-}
-
-function Wait-Api {
-    Write-Running "Waiting for API to be ready..."
-    do {
-        Start-Sleep -Seconds 2
-        try {
-            $response = Invoke-WebRequest -Uri "http://localhost:${ApiPort}/health" -TimeoutSec 2 -ErrorAction Stop
-        } catch {
-            continue
-        }
-    } while ($response.StatusCode -ne 200)
-    Write-Success "API is ready"
-}
-
-# Service container functions -------------------------------------------------
-function Start-DatabaseContainer {
-    $existing = & $ContainerCmd container exists fluent_db 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Success "Database container already exists"
-        return
-    }
-    
-    Write-Running "Starting database container..."
-    & $ContainerCmd run -d --name fluent_db --pod $PodName `
-        -e POSTGRES_USER=postgres `
-        -e POSTGRES_PASSWORD=postgres `
-        -e POSTGRES_DB=fluent `
-        -v fluent-pgdata:/var/lib/postgresql/data `
-        -v ./db/init:/docker-entrypoint-initdb.d `
-        --health-cmd "pg_isready -U postgres -d fluent" `
-        --health-interval 5s `
-        --health-timeout 5s `
-        --health-retries 5 `
-        docker.io/postgres:16-alpine
-    Write-Success "Database container started"
-}
-
-function Start-ApiContainer {
-    $existing = & $ContainerCmd container exists fluent_api 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Success "API container already exists"
-        return
-    }
-    
-    # Validate build context
-    $apiContext = if ($env:API_CONTEXT) { $env:API_CONTEXT } else { "../fluent-api" }
-    if (-not (Test-Path $apiContext)) {
-        Write-Error-Color "API context not found: $apiContext"
-        Write-Error-Color "Please ensure the fluent-api repository is cloned and accessible."
-        exit 1
-    }
-    
-    Write-Running "Building API image..."
-    & $ContainerCmd build -t fluent-api $apiContext -f Dockerfile.dev
-    
-    Write-Running "Starting API container..."
-    & $ContainerCmd run -d --name fluent_api --pod $PodName `
-        -e DATABASE_URL=postgres://postgres:postgres@localhost:5432/fluent `
-        -e EXPORTS_DIR=/app/exports `
-        --env-file "$apiContext/.env" `
-        -v "$apiContext/src:/app/src:ro" `
-        -v "$apiContext/tsconfig.json:/app/tsconfig.json:ro" `
-        -v "$apiContext/drizzle.config.ts:/app/drizzle.config.ts:ro" `
-        -v "$apiContext/docker-entrypoint.sh:/app/docker-entrypoint.sh:ro" `
-        -v fluent-api-node-modules:/app/node_modules `
-        --tmpfs /tmp:noexec,nosuid,size=64m `
-        --tmpfs /app/.cache:noexec,nosuid,size=128m `
-        --tmpfs /app/exports:noexec,nosuid,size=256m `
-        --security-opt no-new-privileges:true `
-        --cap-drop ALL `
-        --user 1001:1001 `
-        --read-only `
-        --health-cmd "curl -f http://localhost:9999/health" `
-        --health-interval 10s `
-        --health-timeout 5s `
-        --health-retries 5 `
-        --health-start-period 15s `
-        fluent-api
-    Write-Success "API container started"
-}
-
-function Start-WorkerContainer {
-    $existing = & $ContainerCmd container exists fluent_worker 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Success "Worker container already exists"
-        return
-    }
-    
-    Write-Running "Starting worker container..."
-    $apiContext = if ($env:API_CONTEXT) { $env:API_CONTEXT } else { "../fluent-api" }
-    & $ContainerCmd run -d --name fluent_worker --pod $PodName `
-        -e DATABASE_URL=postgres://postgres:postgres@localhost:5432/fluent `
-        -e EXPORTS_DIR=/app/exports `
-        --env-file "$apiContext/.env" `
-        -v "$apiContext/src:/app/src:ro" `
-        -v "$apiContext/tsconfig.json:/app/tsconfig.json:ro" `
-        -v fluent-worker-node-modules:/app/node_modules `
-        --tmpfs /tmp:noexec,nosuid,size=64m `
-        --tmpfs /app/.cache:noexec,nosuid,size=128m `
-        --tmpfs /app/exports:noexec,nosuid,size=256m `
-        --security-opt no-new-privileges:true `
-        --cap-drop ALL `
-        --user 1001:1001 `
-        --read-only `
-        fluent-api dumb-init -- npx tsx watch src/workers/standalone-worker.ts
-    Write-Success "Worker container started"
-}
-
-function Start-AiContainer {
-    $existing = & $ContainerCmd container exists fluent_ai 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Success "AI container already exists"
-        return
-    }
-    
-    # Validate build context
-    $aiContext = if ($env:AI_CONTEXT) { $env:AI_CONTEXT } else { "../fluent-ai" }
-    if (-not (Test-Path $aiContext)) {
-        Write-Error-Color "AI context not found: $aiContext"
-        Write-Error-Color "Please ensure the fluent-ai repository is cloned and accessible."
-        exit 1
-    }
-    
-    Write-Running "Building AI image..."
-    & $ContainerCmd build -t fluent-ai $aiContext -f Dockerfile.dev
-    
-    Write-Running "Starting AI container..."
-    & $ContainerCmd run -d --name fluent_ai --pod $PodName `
-        -e DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/fluent" `
-        -e ENVIRONMENT=development `
-        -e DEBUG=true `
-        -e UV_CACHE_DIR=/app/.cache/uv `
-        --env-file "$aiContext/.env" `
-        -v "$aiContext/src:/app/src:ro" `
-        -v "$aiContext/pyproject.toml:/app/pyproject.toml:ro" `
-        -v "$aiContext/uv.lock:/app/uv.lock:ro" `
-        -v "$aiContext/docker-entrypoint.sh:/app/docker-entrypoint.sh:ro" `
-        --tmpfs /tmp:nosuid,size=64m `
-        --tmpfs /app/.cache:noexec,nosuid,size=128m `
-        --security-opt no-new-privileges:true `
-        --cap-drop ALL `
-        --user 1001:1001 `
-        --read-only `
-        fluent-ai
-    Write-Success "AI container started"
-}
-
-function Start-WebContainer {
-    $existing = & $ContainerCmd container exists fluent_web 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Success "Web container already exists"
-        return
-    }
-    
-    # Validate build context
-    $webContext = if ($env:WEB_CONTEXT) { $env:WEB_CONTEXT } else { "../fluent-web" }
-    if (-not (Test-Path $webContext)) {
-        Write-Error-Color "Web context not found: $webContext"
-        Write-Error-Color "Please ensure the fluent-web repository is cloned and accessible."
-        exit 1
-    }
-    
-    Write-Running "Building Web image..."
-    & $ContainerCmd build -t fluent-web $webContext -f Dockerfile.dev
-    
-    Write-Running "Starting Web container..."
-    & $ContainerCmd run -d --name fluent_web --pod $PodName `
-        -e COREPACK_HOME=/app/.cache/corepack `
-        -v "$webContext/src:/app/src" `
-        -v "$webContext/public:/app/public:ro" `
-        -v "$webContext/index.html:/app/index.html:ro" `
-        -v "$webContext/vite.config.ts:/app/vite.config.ts" `
-        -v "$webContext/tsconfig.json:/app/tsconfig.json:ro" `
-        -v "$webContext/tsconfig.node.json:/app/tsconfig.node.json:ro" `
-        -v "$webContext/components.json:/app/components.json:ro" `
-        -v "$webContext/eslint.config.js:/app/eslint.config.js:ro" `
-        -v "$webContext/.env:/app/.env:ro" `
-        -v fluent-web-node-modules:/app/node_modules `
-        --tmpfs /tmp:nosuid,size=64m `
-        --tmpfs /app/.cache:noexec,nosuid,size=128m `
-        --security-opt no-new-privileges:true `
-        --cap-drop ALL `
-        --user 1001:1001 `
-        fluent-web
-    Write-Success "Web container started"
-}
-
-# Podman-specific command functions -------------------------------------------
-function Invoke-PodmanUp {
-    Write-Running "Starting services with Podman pods..."
-    New-Volumes
-    New-Pod
-    Start-DatabaseContainer
-    Wait-Database
-    Start-ApiContainer
-    Wait-Api
-    Start-WorkerContainer
-    Start-AiContainer
-    Start-WebContainer
-    Write-Success "All services started!"
-}
-
-function Invoke-PodmanDown {
-    Write-Running "Stopping services..."
-    Remove-Pod
-    Write-Success "Services stopped."
-}
-
-function Invoke-PodmanLogs {
-    if ($Args.Count -eq 0) {
-        & $ContainerCmd logs -f --pod $PodName
-    } else {
-        & $ContainerCmd logs -f $Args[0]
-    }
-}
-
-function Invoke-PodmanStatus {
-    & $ContainerCmd pod ps
-    $existing = & $ContainerCmd pod exists $PodName 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host ""
-        Write-Host "Containers in pod $PodName:"
-        & $ContainerCmd ps --pod $PodName
-    }
-}
-
-function Invoke-PodmanShell {
-    $service = if ($Args.Count -gt 0) { $Args[0] } else { "api" }
-    if ($service -eq "db") {
-        & $ContainerCmd exec fluent_db psql -U postgres -d fluent
-    } else {
-        & $ContainerCmd exec "fluent_$service" sh
-    }
-}
-
-function Invoke-PodmanRun {
-    if ($Args.Count -lt 2) { Write-Error-Color "Usage: fluent.ps1 run <service> <script>"; exit 1 }
-    $service = $Args[0]
-    $remaining = $Args[1..($Args.Count - 1)]
-    if ($service -eq "ai") {
-        & $ContainerCmd exec "fluent_$service" uv run @remaining
-    } else {
-        & $ContainerCmd exec "fluent_$service" npm run @remaining
-    }
-}
-
-function Invoke-PodmanTest {
-    if ($Args.Count -lt 1) { Write-Error-Color "Usage: fluent.ps1 test <service>"; exit 1 }
-    $service = $Args[0]
-    $remaining = if ($Args.Count -gt 1) { $Args[1..($Args.Count - 1)] } else { @() }
-    if ($service -eq "ai") {
-        & $ContainerCmd exec fluent_ai uv run pytest @remaining
-    } else {
-        & $ContainerCmd exec "fluent_$service" npm run test @remaining
-    }
-}
-
-# Docker Compose fallback functions -------------------------------------------
-function Invoke-Compose {
-    param([string[]]$ComposeArgs)
-    if ($ContainerCmd -eq "docker compose") {
-        & docker compose @ComposeArgs
-    } else {
-        & $ContainerCmd @ComposeArgs
-    }
-}
-
-# ── Repo path helpers ──────────────────────────────────────────────────────────
+$DbPort   = if ($env:DB_PORT)   { $env:DB_PORT }   else { "5432" }
+$ApiPort  = if ($env:API_PORT)  { $env:API_PORT }  else { "9999" }
+$AiPort   = if ($env:AI_PORT)   { $env:AI_PORT }   else { "8200" }
+$WebPort  = if ($env:WEB_PORT)  { $env:WEB_PORT }  else { "5173" }
 
 $ApiContext = if ($env:API_CONTEXT) { $env:API_CONTEXT } else { "../fluent-api" }
 $AiContext  = if ($env:AI_CONTEXT)  { $env:AI_CONTEXT }  else { "../fluent-ai" }
@@ -391,511 +64,600 @@ $WebContext = if ($env:WEB_CONTEXT) { $env:WEB_CONTEXT } else { "../fluent-web" 
 $Repos = @(
     @{ Name = "fluent-api"; Path = $ApiContext; Url = "git@github.com:eten-tech-foundation/fluent-api.git" },
     @{ Name = "fluent-ai";  Path = $AiContext;  Url = "git@github.com:eten-tech-foundation/fluent-ai.git" },
-    @{ Name = "fluent-web"; Path = $WebContext;  Url = "git@github.com:eten-tech-foundation/fluent-web.git" }
+    @{ Name = "fluent-web"; Path = $WebContext; Url = "git@github.com:eten-tech-foundation/fluent-web.git" }
 )
 
 function Test-Repos {
     $missing = $false
     foreach ($repo in $Repos) {
-        if (Test-Path $repo.Path) {
-            Write-Host "  [ok] $($repo.Name) -> $($repo.Path)"
-        } else {
-            Write-Host "  [missing] $($repo.Name) -> $($repo.Path)"
-            $missing = $true
-        }
+        if (Test-Path $repo.Path) { Write-Host "  [ok] $($repo.Name) -> $($repo.Path)" }
+        else { Write-Host "  [missing] $($repo.Name) -> $($repo.Path)"; $missing = $true }
     }
     return -not $missing
 }
 
-# ── Commands ───────────────────────────────────────────────────────────────────
+function Invoke-Compose {
+    param([string[]]$ComposeArgs)
+    if ($ContainerCmd -eq "docker compose") { & docker compose @ComposeArgs }
+    else { & $ContainerCmd @ComposeArgs }
+}
 
-switch ($Command) {
-    "up" {
-        if ($RuntimeMode -eq "podman-pod") {
-            Invoke-PodmanUp
-        } else {
-            Invoke-Compose @("up", "-d", "--build") + $Args
-        }
+function Invoke-Exec {
+    param([string]$Service, [string[]]$CmdArgs)
+    if ($RuntimeMode -eq "podman-pod") {
+        $cname = "fluent-$Service"
+        & $ContainerCmd exec $cname @CmdArgs
+    } else {
+        Invoke-Compose @("exec", $Service) + $CmdArgs
     }
-    "down" {
-        if ($RuntimeMode -eq "podman-pod") {
-            Invoke-PodmanDown
-        } else {
-            Invoke-Compose @("down") + $Args
-        }
-    }
-    "restart" {
-        if ($RuntimeMode -eq "podman-pod") {
-            if ($Args.Count -eq 0) {
-                Write-Host "Restarting all services..."
-                Remove-Pod
-                Invoke-PodmanUp
-            } else {
-                foreach ($service in $Args) {
-                    Write-Host "Restarting $service..."
-                    & $ContainerCmd rm -f "fluent_$service" 2>$null | Out-Null
-                    switch ($service) {
-                        "db" { Start-DatabaseContainer }
-                        "api" { Start-ApiContainer }
-                        "worker" { Start-WorkerContainer }
-                        "ai" { Start-AiContainer }
-                        "web" { Start-WebContainer }
-                        default { Write-Host "Unknown service: $service" }
-                    }
-                }
-            }
-        } else {
-            Invoke-Compose @("restart") + $Args
-        }
-    }
-    "logs" {
-        if ($RuntimeMode -eq "podman-pod") {
-            Invoke-PodmanLogs $Args
-        } else {
-            Invoke-Compose @("logs", "-f") + $Args
-        }
-    }
-    "status" {
-        if ($RuntimeMode -eq "podman-pod") {
-            Invoke-PodmanStatus
-        } else {
-            Invoke-Compose @("ps") + $Args
-        }
-    }
-    "shell" {
-        if ($RuntimeMode -eq "podman-pod") {
-            Invoke-PodmanShell $Args
-        } else {
-            $service = if ($Args.Count -gt 0) { $Args[0] } else { "api" }
-            if ($service -eq "db") {
-                Invoke-Compose @("exec", "db", "psql", "-U", "postgres", "-d", "fluent")
-            } else {
-                Invoke-Compose @("exec", $service, "sh")
-            }
-        }
-    }
-    "run" {
-        if ($RuntimeMode -eq "podman-pod") {
-            Invoke-PodmanRun $Args
-        } else {
-            if ($Args.Count -lt 2) { Write-Error "Usage: fluent.ps1 run <service> <script>"; exit 1 }
-            $service = $Args[0]
-            $remaining = $Args[1..($Args.Count - 1)]
-            Invoke-Compose @("exec", $service, "npm", "run") + $remaining
-        }
-    }
-    "test" {
-        if ($RuntimeMode -eq "podman-pod") {
-            Invoke-PodmanTest $Args
-        } else {
-            if ($Args.Count -lt 1) { Write-Error "Usage: fluent.ps1 test <service>"; exit 1 }
-            $service = $Args[0]
-            $remaining = if ($Args.Count -gt 1) { $Args[1..($Args.Count - 1)] } else { @() }
-            if ($service -eq "ai") {
-                Invoke-Compose @("exec", "ai", "uv", "run", "pytest") + $remaining
-            } else {
-                Invoke-Compose @("exec", $service, "npm", "run", "test") + $remaining
-            }
-        }
-    }
+}
 
-    # ── Database commands ──────────────────────────────────────────────────────
+# ── Ecosystem commands ────────────────────────────────────────────────────────
 
-    "db:migrate" {
-        $target = if ($Args.Count -gt 0) { $Args[0] } else { "all" }
-        if ($RuntimeMode -eq "podman-pod") {
-            switch ($target) {
+function Ecosystem-Up {
+    param([string[]]$Services)
+    if ($RuntimeMode -eq "podman-pod") {
+        Write-Running "Starting services with Podman..."
+        & $ContainerCmd volume create fluent-pgdata 2>$null | Out-Null
+        & $ContainerCmd volume create fluent-api-node-modules 2>$null | Out-Null
+        & $ContainerCmd volume create fluent-worker-node-modules 2>$null | Out-Null
+        & $ContainerCmd volume create fluent-web-node-modules 2>$null | Out-Null
+        & $ContainerCmd volume create fluent-ai-logs 2>$null | Out-Null
+        & $ContainerCmd volume create fluent-web-eslintcache 2>$null | Out-Null
+
+        $existing = & $ContainerCmd pod exists $PodName 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Running "Creating pod $PodName..."
+            & $ContainerCmd pod create --name $PodName --share "net,ipc,uts" `
+                -p "${DbPort}:5432" -p "${ApiPort}:9999" -p "${AiPort}:8200" -p "${WebPort}:5173"
+        }
+
+        # Start DB
+        $dbExists = & $ContainerCmd container exists fluent-db 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Running "Starting database container..."
+            & $ContainerCmd run -d --name fluent-db --pod $PodName `
+                -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=fluent `
+                -v fluent-pgdata:/var/lib/postgresql/data `
+                -v "$ScriptDir/db/init:/docker-entrypoint-initdb.d:ro" `
+                --health-cmd "pg_isready -U postgres -d fluent" `
+                --health-interval 5s --health-timeout 5s --health-retries 5 `
+                docker.io/postgres:16-alpine
+        }
+        Write-Running "Waiting for database..."
+        do { Start-Sleep -Seconds 2; & $ContainerCmd exec fluent-db pg_isready -U postgres -d fluent 2>$null | Out-Null }
+        while ($LASTEXITCODE -ne 0)
+        Write-Success "Database is ready"
+
+        # Build and start services
+        foreach ($svc in @("api","worker","ai","web")) {
+            if ($Services.Count -gt 0 -and $Services -notcontains $svc) { continue }
+            $cname = "fluent-$svc"
+            $exists = & $ContainerCmd container exists $cname 2>$null
+            if ($LASTEXITCODE -eq 0) { Write-Success "$svc container already exists"; continue }
+
+            switch ($svc) {
                 "api" {
-                    Write-Running "Running fluent-api migrations..."
-                    & $ContainerCmd exec fluent_api npx drizzle-kit migrate
-                    Write-Success "API migrations completed"
+                    Write-Running "Building API image..."
+                    & $ContainerCmd build -t fluent-api $ApiContext -f Dockerfile.dev
+                    $envFlags = @("-e","NODE_ENV=development","-e","DATABASE_URL=postgres://postgres:postgres@localhost:5432/fluent","-e","EXPORTS_DIR=/app/exports")
+                    if (Test-Path "$ApiContext/.env") { $envFlags += @("--env-file","$ApiContext/.env") }
+                    & $ContainerCmd run -d --name fluent-api --pod $PodName @envFlags `
+                        -v "$ApiContext/src:/app/src:ro" -v "$ApiContext/tsconfig.json:/app/tsconfig.json:ro" `
+                        -v "$ApiContext/drizzle.config.ts:/app/drizzle.config.ts:ro" `
+                        -v "$ApiContext/docker-entrypoint.sh:/app/docker-entrypoint.sh:ro" `
+                        -v fluent-api-node-modules:/app/node_modules `
+                        --tmpfs /tmp:noexec,nosuid,size=64m --tmpfs /app/.cache:noexec,nosuid,size=128m `
+                        --tmpfs /app/exports:noexec,nosuid,size=256m `
+                        --security-opt no-new-privileges:true --cap-drop ALL --user 1001:1001 --read-only `
+                        --health-cmd "curl -f http://localhost:9999/health" --health-interval 10s `
+                        --health-timeout 5s --health-retries 5 --health-start-period 15s fluent-api
+                }
+                "worker" {
+                    $envFlags = @("-e","NODE_ENV=development","-e","DATABASE_URL=postgres://postgres:postgres@localhost:5432/fluent","-e","EXPORTS_DIR=/app/exports")
+                    if (Test-Path "$ApiContext/.env") { $envFlags += @("--env-file","$ApiContext/.env") }
+                    & $ContainerCmd run -d --name fluent-worker --pod $PodName @envFlags `
+                        -v "$ApiContext/src:/app/src:ro" -v "$ApiContext/tsconfig.json:/app/tsconfig.json:ro" `
+                        -v fluent-worker-node-modules:/app/node_modules `
+                        --tmpfs /tmp:noexec,nosuid,size=64m --tmpfs /app/.cache:noexec,nosuid,size=128m `
+                        --tmpfs /app/exports:noexec,nosuid,size=256m `
+                        --security-opt no-new-privileges:true --cap-drop ALL --user 1001:1001 --read-only `
+                        fluent-api dumb-init -- npx tsx watch src/workers/standalone-worker.ts
                 }
                 "ai" {
-                    Write-Running "Running fluent-ai migrations..."
-                    Write-Host "  (no migrations configured yet)"
+                    Write-Running "Building AI image..."
+                    & $ContainerCmd build -t fluent-ai $AiContext -f Dockerfile.dev
+                    $envFlags = @("-e","DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/fluent","-e","ENVIRONMENT=development","-e","DEBUG=true","-e","UV_CACHE_DIR=/app/.cache/uv")
+                    if (Test-Path "$AiContext/.env") { $envFlags += @("--env-file","$AiContext/.env") }
+                    & $ContainerCmd run -d --name fluent-ai --pod $PodName @envFlags `
+                        -v "$AiContext/src:/app/src:ro" -v "$AiContext/tests:/app/tests:ro" `
+                        -v "$AiContext/pyproject.toml:/app/pyproject.toml:ro" `
+                        -v "$AiContext/uv.lock:/app/uv.lock:ro" `
+                        -v "$AiContext/docker-entrypoint.sh:/app/docker-entrypoint.sh:ro" `
+                        -v fluent-ai-logs:/app/logs `
+                        --tmpfs /tmp:nosuid,size=64m --tmpfs /app/.cache:noexec,nosuid,size=128m `
+                        --security-opt no-new-privileges:true --cap-drop ALL --user 1001:1001 --read-only fluent-ai
                 }
-                "all" {
-                    $confirm = Read-Host "Run migrations for all services? [y/N]"
-                    if ($confirm -match "^[Yy]$") {
-                        Write-Running "Running fluent-api migrations..."
-                        & $ContainerCmd exec fluent_api npx drizzle-kit migrate
-                        Write-Success "All migrations completed"
-                    } else {
-                        Write-Host "Aborted."
-                    }
-                }
-                { $_ -in "web", "db" } {
-                    Write-Error-Color "The $target service does not have its own migrations."
-                    exit 1
-                }
-                default {
-                    Write-Error-Color "Unknown migrate target: $target (use api, ai, or all)"
-                    exit 1
-                }
-            }
-        } else {
-            switch ($target) {
-                "api" {
-                    Write-Running "Running fluent-api migrations..."
-                    Invoke-Compose @("exec", "api", "npx", "drizzle-kit", "migrate")
-                    Write-Success "API migrations completed"
-                }
-                "ai" {
-                    Write-Running "Running fluent-ai migrations..."
-                    Write-Host "  (no migrations configured yet)"
-                }
-                "all" {
-                    $confirm = Read-Host "Run migrations for all services? [y/N]"
-                    if ($confirm -match "^[Yy]$") {
-                        Write-Running "Running fluent-api migrations..."
-                        Invoke-Compose @("exec", "api", "npx", "drizzle-kit", "migrate")
-                        Write-Success "All migrations completed"
-                    } else {
-                        Write-Host "Aborted."
-                    }
-                }
-                { $_ -in "web", "db" } {
-                    Write-Error-Color "The $target service does not have its own migrations."
-                    exit 1
-                }
-                default {
-                    Write-Error-Color "Unknown migrate target: $target (use api, ai, or all)"
-                    exit 1
+                "web" {
+                    Write-Running "Building Web image..."
+                    & $ContainerCmd build -t fluent-web $WebContext -f Dockerfile.dev
+                    $envFlags = @("-e","COREPACK_HOME=/app/.cache/corepack","-e","COREPACK_ENABLE_AUTO_PIN=0","-e","VITE_API_URL=http://localhost:${ApiPort}")
+                    if (Test-Path "$WebContext/.env") { $envFlags += @("--env-file","$WebContext/.env") }
+                    & $ContainerCmd run -d --name fluent-web --pod $PodName @envFlags `
+                        -v "$WebContext/src:/app/src" -v "$WebContext/public:/app/public:ro" `
+                        -v "$WebContext/index.html:/app/index.html:ro" `
+                        -v "$WebContext/vite.config.ts:/app/vite.config.ts" `
+                        -v "$WebContext/tsconfig.json:/app/tsconfig.json:ro" `
+                        -v "$WebContext/tsconfig.node.json:/app/tsconfig.node.json:ro" `
+                        -v "$WebContext/components.json:/app/components.json:ro" `
+                        -v "$WebContext/eslint.config.js:/app/eslint.config.js:ro" `
+                        -v "$WebContext/.prettierrc.js:/app/.prettierrc.js:ro" `
+                        -v "$WebContext/.prettierignore:/app/.prettierignore:ro" `
+                        -v "$WebContext/.env:/app/.env:ro" `
+                        -v fluent-web-node-modules:/app/node_modules `
+                        -v fluent-web-eslintcache:/app/.eslintcache `
+                        --tmpfs /tmp:nosuid,size=64m --tmpfs /app/.cache:noexec,nosuid,uid=1001,gid=1001,size=128m `
+                        --security-opt no-new-privileges:true --cap-drop ALL --user 1001:1001 fluent-web
                 }
             }
+            Write-Success "$svc container started"
         }
+        Write-Success "All services started!"
+    } else {
+        if ($Services.Count -eq 0) { Invoke-Compose @("up", "-d", "--build") }
+        else { Invoke-Compose @("up", "-d", "--build", "--no-deps") + $Services }
     }
-    "db:seed" {
-        $target = if ($Args.Count -gt 0) { $Args[0] } else { "all" }
-        if ($RuntimeMode -eq "podman-pod") {
-            switch ($target) {
-                "api" {
-                    Write-Running "Running fluent-api seeds..."
-                    & $ContainerCmd exec fluent_api npx tsx src/db/seeds/rbac.ts
-                    Write-Success "API seeds completed"
-                }
-                "ai" {
-                    Write-Running "Running fluent-ai seeds..."
-                    Write-Host "  (no seeds configured yet)"
-                }
-                "all" {
-                    $confirm = Read-Host "Run seeds for all services? [y/N]"
-                    if ($confirm -match "^[Yy]$") {
-                        Write-Running "Running fluent-api seeds..."
-                        & $ContainerCmd exec fluent_api npx tsx src/db/seeds/rbac.ts
-                        Write-Success "All seeds completed"
-                    } else {
-                        Write-Host "Aborted."
-                    }
-                }
-                { $_ -in "web", "db" } {
-                    Write-Error-Color "The $target service does not have its own seeds."
-                    exit 1
-                }
-                default {
-                    Write-Error-Color "Unknown seed target: $target (use api, ai, or all)"
-                    exit 1
-                }
-            }
-        } else {
-            switch ($target) {
-                "api" {
-                    Write-Running "Running fluent-api seeds..."
-                    Invoke-Compose @("exec", "api", "npx", "tsx", "src/db/seeds/rbac.ts")
-                    Write-Success "API seeds completed"
-                }
-                "ai" {
-                    Write-Running "Running fluent-ai seeds..."
-                    Write-Host "  (no seeds configured yet)"
-                }
-                "all" {
-                    $confirm = Read-Host "Run seeds for all services? [y/N]"
-                    if ($confirm -match "^[Yy]$") {
-                        Write-Running "Running fluent-api seeds..."
-                        Invoke-Compose @("exec", "api", "npx", "tsx", "src/db/seeds/rbac.ts")
-                        Write-Success "All seeds completed"
-                    } else {
-                        Write-Host "Aborted."
-                    }
-                }
-                { $_ -in "web", "db" } {
-                    Write-Error-Color "The $target service does not have its own seeds."
-                    exit 1
-                }
-                default {
-                    Write-Error-Color "Unknown seed target: $target (use api, ai, or all)"
-                    exit 1
-                }
-            }
-        }
-    }
-    "db:init" {
-        Write-Running "Full database initialization (migrations + seeds)..."
-        $confirm = Read-Host "This will run all migrations and seeds. Continue? [y/N]"
-        if ($confirm -match "^[Yy]$") {
-            if ($RuntimeMode -eq "podman-pod") {
-                & $ContainerCmd exec fluent_api npx drizzle-kit migrate
-                & $ContainerCmd exec fluent_api npx tsx src/db/seeds/rbac.ts
-            } else {
-                & $MyInvocation.MyCommand.Path "db:migrate" "api"
-                & $MyInvocation.MyCommand.Path "db:seed" "api"
-            }
-            Write-Success "Database initialization complete."
-        } else {
-            Write-Host "Aborted."
-        }
-    }
-    "db:studio" {
-        Write-Running "Running Drizzle Studio on host (requires local Node.js)..."
-        Write-Host "Connects to DB via DATABASE_URL in .env (localhost:$DbPort)"
-        npx drizzle-kit studio
-    }
-    "db:psql" {
-        if ($RuntimeMode -eq "podman-pod") {
-            & $ContainerCmd exec fluent_db psql -U postgres -d fluent
-        } else {
-            Invoke-Compose @("exec", "db", "psql", "-U", "postgres", "-d", "fluent")
-        }
-    }
+}
 
-    # Lifecycle commands -----------------------------------------------------------
-    "clean" {
-        $target = if ($Args.Count -gt 0) { $Args[0] } else { "all" }
-        Write-Running "This will remove containers AND volumes (full DB reset)."
-        $confirm = Read-Host "Continue? [y/N]"
-        if ($confirm -match "^[Yy]$") {
-            if ($RuntimeMode -eq "podman-pod") {
-                if ($target -eq "all") {
-                    Remove-Pod
-                    & $ContainerCmd volume rm fluent-pgdata fluent-api-node-modules fluent-worker-node-modules fluent-web-node-modules 2>$null | Out-Null
-                    $apiContext = if ($env:API_CONTEXT) { $env:API_CONTEXT } else { "../fluent-api" }
-                    $aiContext = if ($env:AI_CONTEXT) { $env:AI_CONTEXT } else { "../fluent-ai" }
-                    Remove-Item -Force -ErrorAction SilentlyContinue "$apiContext/.db-initialized"
-                    Remove-Item -Force -ErrorAction SilentlyContinue "$aiContext/.db-initialized"
-                    Write-Success "All containers and volumes removed"
-                } else {
-                    & $ContainerCmd rm -f "fluent_$target" 2>$null | Out-Null
-                    $apiContext = if ($env:API_CONTEXT) { $env:API_CONTEXT } else { "../fluent-api" }
-                    $aiContext = if ($env:AI_CONTEXT) { $env:AI_CONTEXT } else { "../fluent-ai" }
-                    switch ($target) {
-                        { $_ -in "api", "worker" } { Remove-Item -Force -ErrorAction SilentlyContinue "$apiContext/.db-initialized" }
-                        "ai" { Remove-Item -Force -ErrorAction SilentlyContinue "$aiContext/.db-initialized" }
-                    }
-                    Write-Success "$target container and related data removed"
-                }
-            } else {
-                if ($target -eq "all") {
-                    Invoke-Compose @("down", "-v")
-                    $apiContext = if ($env:API_CONTEXT) { $env:API_CONTEXT } else { "../fluent-api" }
-                    $aiContext = if ($env:AI_CONTEXT) { $env:AI_CONTEXT } else { "../fluent-ai" }
-                    Remove-Item -Force -ErrorAction SilentlyContinue "$apiContext/.db-initialized"
-                    Remove-Item -Force -ErrorAction SilentlyContinue "$aiContext/.db-initialized"
-                    Write-Success "All containers and volumes removed"
-                } else {
-                    Invoke-Compose @("rm", "-sf", $target)
-                    $apiContext = if ($env:API_CONTEXT) { $env:API_CONTEXT } else { "../fluent-api" }
-                    $aiContext = if ($env:AI_CONTEXT) { $env:AI_CONTEXT } else { "../fluent-ai" }
-                    switch ($target) {
-                        { $_ -in "api", "worker" } { Remove-Item -Force -ErrorAction SilentlyContinue "$apiContext/.db-initialized" }
-                        "ai" { Remove-Item -Force -ErrorAction SilentlyContinue "$aiContext/.db-initialized" }
-                    }
-                    Write-Success "$target container and related data removed"
-                }
-            }
+function Ecosystem-Down {
+    param([string[]]$Services)
+    if ($RuntimeMode -eq "podman-pod") {
+        if ($Services.Count -eq 0) {
+            Write-Running "Stopping services..."
+            & $ContainerCmd pod rm $PodName -f 2>$null | Out-Null
+            Write-Success "Services stopped."
         } else {
-            Write-Host "Aborted."
-        }
-    }
-    "fresh" {
-        Write-Running "This will destroy ALL containers, volumes, and images for this project."
-        Write-Running "The database will be wiped and everything will be rebuilt from scratch."
-        $confirm = Read-Host "Continue? [y/N]"
-        if ($confirm -match "^[Yy]$") {
-            if ($RuntimeMode -eq "podman-pod") {
-                Remove-Pod
-                & $ContainerCmd volume rm fluent-pgdata fluent-api-node-modules fluent-worker-node-modules fluent-web-node-modules 2>$null | Out-Null
-                & $ContainerCmd rmi -f fluent-api fluent-ai fluent-web 2>$null | Out-Null
-                $apiContext = if ($env:API_CONTEXT) { $env:API_CONTEXT } else { "../fluent-api" }
-                $aiContext = if ($env:AI_CONTEXT) { $env:AI_CONTEXT } else { "../fluent-ai" }
-                Remove-Item -Force -ErrorAction SilentlyContinue "$apiContext/.db-initialized"
-                Remove-Item -Force -ErrorAction SilentlyContinue "$aiContext/.db-initialized"
-            } else {
-                Invoke-Compose @("down", "-v", "--rmi", "local", "--remove-orphans")
-                $apiContext = if ($env:API_CONTEXT) { $env:API_CONTEXT } else { "../fluent-api" }
-                $aiContext = if ($env:AI_CONTEXT) { $env:AI_CONTEXT } else { "../fluent-ai" }
-                Remove-Item -Force -ErrorAction SilentlyContinue "$apiContext/.db-initialized"
-                Remove-Item -Force -ErrorAction SilentlyContinue "$aiContext/.db-initialized"
+            foreach ($svc in $Services) {
+                Write-Running "Stopping $svc..."
+                & $ContainerCmd rm -f "fluent-$svc" 2>$null | Out-Null
             }
+        }
+    } else {
+        if ($Services.Count -eq 0) { Invoke-Compose @("down") }
+        else { Invoke-Compose @("rm", "-sf") + $Services }
+    }
+}
+
+function Ecosystem-Restart {
+    param([string[]]$Services)
+    if ($RuntimeMode -eq "podman-pod") {
+        if ($Services.Count -eq 0) {
+            Write-Running "Restarting all services..."
+            & $ContainerCmd pod rm $PodName -f 2>$null | Out-Null
+            Ecosystem-Up
+        } else {
+            foreach ($svc in $Services) {
+                Write-Running "Restarting $svc..."
+                & $ContainerCmd rm -f "fluent-$svc" 2>$null | Out-Null
+            }
+            Ecosystem-Up -Services $Services
+        }
+    } else {
+        if ($Services.Count -eq 0) { Invoke-Compose @("restart") }
+        else { Invoke-Compose @("restart") + $Services }
+    }
+}
+
+function Ecosystem-Logs {
+    param([string[]]$Services)
+    if ($RuntimeMode -eq "podman-pod") {
+        if ($Services.Count -eq 0) { & $ContainerCmd pod logs -f $PodName }
+        else { & $ContainerCmd logs -f "fluent-$($Services[0])" }
+    } else {
+        Invoke-Compose @("logs", "-f") + $Services
+    }
+}
+
+function Ecosystem-Status {
+    if ($RuntimeMode -eq "podman-pod") {
+        & $ContainerCmd pod ps
+        $existing = & $ContainerCmd pod exists $PodName 2>$null
+        if ($LASTEXITCODE -eq 0) {
             Write-Host ""
-            Write-Success "Clean slate. Run '.\fluent.ps1 up' to rebuild and start everything."
-        } else {
-            Write-Host "Aborted."
+            Write-Host "Containers in pod $PodName:"
+            & $ContainerCmd ps -a --filter "pod=$PodName"
         }
+    } else {
+        Invoke-Compose @("ps")
     }
-    "build" {
-        $services = $Args
-        
+}
+
+function Ecosystem-Shell {
+    param([string]$Service = "api")
+    if ($Service -eq "db") {
+        if ($RuntimeMode -eq "podman-pod") { & $ContainerCmd exec -it fluent-db psql -U postgres -d fluent }
+        else { Invoke-Compose @("exec", "db", "psql", "-U", "postgres", "-d", "fluent") }
+    } else {
+        Invoke-Exec $Service @("sh")
+    }
+}
+
+function Ecosystem-Clean {
+    param([string]$Target = "all")
+    Write-Running "This will remove containers AND volumes (full DB reset)."
+    $confirm = Read-Host "Continue? [y/N]"
+    if ($confirm -match "^[Yy]$") {
         if ($RuntimeMode -eq "podman-pod") {
-            if ($services.Count -eq 0) {
-                Write-Running "Building all images..."
-                $services = @("api", "ai", "web")
+            if ($Target -eq "all") {
+                & $ContainerCmd pod rm $PodName -f 2>$null | Out-Null
+                & $ContainerCmd volume rm fluent-pgdata fluent-api-node-modules fluent-worker-node-modules fluent-web-node-modules fluent-ai-logs fluent-web-eslintcache 2>$null | Out-Null
+                Write-Success "All containers and volumes removed"
             } else {
-                Write-Running "Building specified services: $($services -join ', ')"
+                & $ContainerCmd rm -f "fluent-$Target" 2>$null | Out-Null
+                Write-Success "$Target container removed"
             }
-            
-            # Validate build contexts exist for requested services
-            $missingContexts = @()
-            foreach ($service in $services) {
-                switch ($service) {
-                    "api" {
-                        $apiContext = if ($env:API_CONTEXT) { $env:API_CONTEXT } else { "../fluent-api" }
-                        if (-not (Test-Path $apiContext)) { $missingContexts += "API context: $apiContext" }
-                    }
-                    "ai" {
-                        $aiContext = if ($env:AI_CONTEXT) { $env:AI_CONTEXT } else { "../fluent-ai" }
-                        if (-not (Test-Path $aiContext)) { $missingContexts += "AI context: $aiContext" }
-                    }
-                    "web" {
-                        $webContext = if ($env:WEB_CONTEXT) { $env:WEB_CONTEXT } else { "../fluent-web" }
-                        if (-not (Test-Path $webContext)) { $missingContexts += "Web context: $webContext" }
-                    }
-                    default {
-                        Write-Error-Color "Unknown service '$service' (use: api, ai, web)"
-                        exit 1
-                    }
-                }
-            }
-            
-            if ($missingContexts.Count -gt 0) {
-                Write-Error-Color "Missing build contexts:"
-                foreach ($context in $missingContexts) {
-                    Write-Host "  - $context"
-                }
-                Write-Host ""
-                Write-Host "Please ensure all repositories are cloned and accessible, or run:"
-                Write-Host "  .\fluent.ps1 setup"
-                exit 1
-            }
-            
-            # Build requested services
-            foreach ($service in $services) {
-                switch ($service) {
-                    "api" {
-                        Write-Running "Building API image..."
-                        $apiContext = if ($env:API_CONTEXT) { $env:API_CONTEXT } else { "../fluent-api" }
-                        & $ContainerCmd build -t fluent-api $apiContext -f Dockerfile.dev
-                        Write-Success "API image built successfully"
-                    }
-                    "ai" {
-                        Write-Running "Building AI image..."
-                        $aiContext = if ($env:AI_CONTEXT) { $env:AI_CONTEXT } else { "../fluent-ai" }
-                        & $ContainerCmd build -t fluent-ai $aiContext -f Dockerfile.dev
-                        Write-Success "AI image built successfully"
-                    }
-                    "web" {
-                        Write-Running "Building Web image..."
-                        $webContext = if ($env:WEB_CONTEXT) { $env:WEB_CONTEXT } else { "../fluent-web" }
-                        & $ContainerCmd build -t fluent-web $webContext -f Dockerfile.dev
-                        Write-Success "Web image built successfully"
-                    }
-                }
-            }
-            Write-Success "Build process completed"
         } else {
-            if ($services.Count -eq 0) {
-                Write-Running "Building all Docker Compose services..."
-                Invoke-Compose @("build", "--no-cache")
-            } else {
-                Write-Running "Building specified Docker Compose services: $($services -join ', ')"
-                Invoke-Compose @("build", "--no-cache") + $services
-            }
-            Write-Success "Docker Compose build completed"
+            if ($Target -eq "all") { Invoke-Compose @("down", "-v") }
+            else { Invoke-Compose @("rm", "-sf", $Target) }
         }
+    } else {
+        Write-Host "Aborted."
     }
-    "setup" {
-        Write-Host "=== Fluent Platform Setup ==="
+}
+
+function Ecosystem-Fresh {
+    Write-Running "This will destroy ALL containers, volumes, and images."
+    $confirm = Read-Host "Continue? [y/N]"
+    if ($confirm -match "^[Yy]$") {
+        if ($RuntimeMode -eq "podman-pod") {
+            & $ContainerCmd pod rm $PodName -f 2>$null | Out-Null
+            & $ContainerCmd volume rm fluent-pgdata fluent-api-node-modules fluent-worker-node-modules fluent-web-node-modules fluent-ai-logs fluent-web-eslintcache 2>$null | Out-Null
+            & $ContainerCmd rmi -f fluent-api fluent-ai fluent-web 2>$null | Out-Null
+        } else {
+            Invoke-Compose @("down", "-v", "--rmi", "local", "--remove-orphans")
+        }
         Write-Host ""
+        Write-Success "Clean slate. Run '.\fluent.ps1 up' to rebuild and start everything."
+    } else {
+        Write-Host "Aborted."
+    }
+}
 
-        Write-Host "Checking sibling repositories..."
-        $allPresent = Test-Repos
+function Ecosystem-Build {
+    param([string[]]$Services)
+    if ($Services.Count -eq 0) { $Services = @("api", "ai", "web") }
+    if ($RuntimeMode -eq "podman-pod") {
+        foreach ($svc in $Services) {
+            switch ($svc) {
+                "api"  { & $ContainerCmd build -t fluent-api $ApiContext -f Dockerfile.dev }
+                "ai"   { & $ContainerCmd build -t fluent-ai $AiContext -f Dockerfile.dev }
+                "web"  { & $ContainerCmd build -t fluent-web $WebContext -f Dockerfile.dev }
+            }
+        }
+    } else {
+        if ($Services.Count -eq 0) { Invoke-Compose @("build", "--no-cache") }
+        else { Invoke-Compose @("build", "--no-cache") + $Services }
+    }
+    Write-Success "Build complete"
+}
 
-        if (-not $allPresent) {
-            Write-Host ""
-            Write-Host "Missing repositories detected. Clone them with:"
+# ── Repo-specific commands ──────────────────────────────────────────────────────
+
+function Invoke-RepoCmd {
+    param([string]$Repo, [string]$Cmd, [string[]]$Remaining)
+
+    switch ($Repo) {
+        "api" {
+            switch ($Cmd) {
+                "up"     { Ecosystem-Up -Services @("api") }
+                "down"   { Ecosystem-Down -Services @("api") }
+                "restart"{ Ecosystem-Restart -Services @("api") }
+                "logs"   { Ecosystem-Logs -Services @("api") }
+                "shell"  { Ecosystem-Shell "api" }
+                "test"   { Invoke-Exec "api" @("npm", "run", "test") + $Remaining }
+                "lint"   { Invoke-Exec "api" @("npm", "run", "lint") }
+                "lint:fix" { Invoke-Exec "api" @("npm", "run", "lint:fix") }
+                "format" { Invoke-Exec "api" @("npm", "run", "format") }
+                "format:check" { Invoke-Exec "api" @("npm", "run", "format:check") }
+                "typecheck" { Invoke-Exec "api" @("npm", "run", "typecheck") }
+                "run"    { Invoke-Exec "api" @("npm", "run") + $Remaining }
+                "db:migrate" { Invoke-Exec "api" @("npx", "drizzle-kit", "migrate") }
+                "db:seed" {
+                    Invoke-Exec "api" @("npx", "tsx", "src/db/seeds/roles.ts")
+                    Invoke-Exec "api" @("npx", "tsx", "src/db/seeds/rbac.ts")
+                }
+                "db:generate" {
+                    $name = if ($Remaining.Count -gt 0) { $Remaining[0] } else { throw "Usage: fluent.ps1 api db:generate <name>" }
+                    Invoke-Exec "api" @("npx", "drizzle-kit", "generate", "--name", $name)
+                }
+                "db:dump-schema" {
+                    $output = if ($Remaining.Count -gt 0) { $Remaining[0] } else { "$ScriptDir/db/schema-dump.sql" }
+                    Write-Running "Dumping API schema to $output..."
+                    $header = "-- Schema-only dump of fluent-api public tables.`r`n-- Auto-generated.`r`n"
+                    $header | Out-File -FilePath $output -Encoding utf8
+                    if ($RuntimeMode -eq "podman-pod") {
+                        & $ContainerCmd exec fluent-db pg_dump -U postgres --schema-only --schema=public fluent | Add-Content -Path $output
+                    } else {
+                        Invoke-Compose @("exec", "-T", "db", "pg_dump", "-U", "postgres", "--schema-only", "--schema=public", "fluent") | Add-Content -Path $output
+                    }
+                    Write-Success "Schema dumped to $output"
+                }
+                default  { Write-Error-Color "Unknown api command: $Cmd"; exit 1 }
+            }
+        }
+        "ai" {
+            switch ($Cmd) {
+                "up"     { Ecosystem-Up -Services @("ai") }
+                "down"   { Ecosystem-Down -Services @("ai") }
+                "restart"{ Ecosystem-Restart -Services @("ai") }
+                "logs"   { Ecosystem-Logs -Services @("ai") }
+                "shell"  { Ecosystem-Shell "ai" }
+                "test"   { Invoke-Exec "ai" @("uv", "run", "pytest", "tests/", "-v") + $Remaining }
+                "lint"   { Invoke-Exec "ai" @("uv", "run", "ruff", "check") }
+                "lint:fix" { Invoke-Exec "ai" @("uv", "run", "ruff", "check", "--fix") }
+                "format" { Invoke-Exec "ai" @("uv", "run", "ruff", "format") }
+                "format:check" { Invoke-Exec "ai" @("uv", "run", "ruff", "format", "--check") }
+                "typecheck" { Invoke-Exec "ai" @("uv", "run", "mypy", "src") }
+                "run"    { Invoke-Exec "ai" @("uv", "run") + $Remaining }
+                "db:migrate" { Write-Host "(no migrations configured yet)" }
+                "db:seed"    { Write-Host "(no seeds configured yet)" }
+                default  { Write-Error-Color "Unknown ai command: $Cmd"; exit 1 }
+            }
+        }
+        "web" {
+            switch ($Cmd) {
+                "up"     { Ecosystem-Up -Services @("web") }
+                "down"   { Ecosystem-Down -Services @("web") }
+                "restart"{ Ecosystem-Restart -Services @("web") }
+                "logs"   { Ecosystem-Logs -Services @("web") }
+                "shell"  { Ecosystem-Shell "web" }
+                "test"   { Invoke-Exec "web" @("pnpm", "test") + $Remaining }
+                "lint"   { Invoke-Exec "web" @("pnpm", "lint") }
+                "lint:fix" { Invoke-Exec "web" @("pnpm", "lint:fix") }
+                "format" { Invoke-Exec "web" @("pnpm", "format") }
+                "format:check" { Invoke-Exec "web" @("pnpm", "format:check") }
+                "typecheck" { Invoke-Exec "web" @("pnpm", "typecheck") }
+                "precheck" { Invoke-Exec "web" @("pnpm", "precheck") }
+                "preview"  { Invoke-Exec "web" @("pnpm", "preview") }
+                "run"    { Invoke-Exec "web" @("pnpm") + $Remaining }
+                default  { Write-Error-Color "Unknown web command: $Cmd"; exit 1 }
+            }
+        }
+        "worker" {
+            switch ($Cmd) {
+                "up"     { Ecosystem-Up -Services @("worker") }
+                "down"   { Ecosystem-Down -Services @("worker") }
+                "restart"{ Ecosystem-Restart -Services @("worker") }
+                "logs"   { Ecosystem-Logs -Services @("worker") }
+                "shell"  { Ecosystem-Shell "worker" }
+                default  { Write-Error-Color "Worker does not support '$Cmd'. Use 'api' for dev commands."; exit 1 }
+            }
+        }
+    }
+}
+
+# ── Database commands ─────────────────────────────────────────────────────────
+
+function Db-Migrate {
+    param([string]$Target = "all")
+    switch ($Target) {
+        "api" {
+            Write-Running "Running fluent-api migrations..."
+            Invoke-Exec "api" @("npx", "drizzle-kit", "migrate")
+            Write-Success "API migrations completed"
+        }
+        "ai" {
+            Write-Running "Running fluent-ai migrations..."
+            Write-Host "  (no migrations configured yet)"
+        }
+        "all" {
+            $confirm = Read-Host "Run migrations for all services? [y/N]"
+            if ($confirm -match "^[Yy]$") { Db-Migrate "api" }
+            else { Write-Host "Aborted." }
+        }
+        default { Write-Error-Color "Unknown migrate target: $Target"; exit 1 }
+    }
+}
+
+function Db-Seed {
+    param([string]$Target = "all")
+    switch ($Target) {
+        "api" {
+            Write-Running "Running fluent-api seeds..."
+            Invoke-Exec "api" @("npx", "tsx", "src/db/seeds/roles.ts")
+            Invoke-Exec "api" @("npx", "tsx", "src/db/seeds/rbac.ts")
+            Write-Success "API seeds completed"
+        }
+        "ai" {
+            Write-Running "Running fluent-ai seeds..."
+            Write-Host "  (no seeds configured yet)"
+        }
+        "all" {
+            $confirm = Read-Host "Run seeds for all services? [y/N]"
+            if ($confirm -match "^[Yy]$") { Db-Seed "api" }
+            else { Write-Host "Aborted." }
+        }
+        default { Write-Error-Color "Unknown seed target: $Target"; exit 1 }
+    }
+}
+
+function Db-Init {
+    Write-Running "Full database initialization (migrations + seeds)..."
+    $confirm = Read-Host "Continue? [y/N]"
+    if ($confirm -match "^[Yy]$") {
+        Db-Migrate "api"
+        Db-Seed "api"
+        Write-Success "Database initialization complete."
+    } else {
+        Write-Host "Aborted."
+    }
+}
+
+function Db-Psql {
+    if ($RuntimeMode -eq "podman-pod") { & $ContainerCmd exec -it fluent-db psql -U postgres -d fluent }
+    else { Invoke-Compose @("exec", "db", "psql", "-U", "postgres", "-d", "fluent") }
+}
+
+function Db-Studio {
+    Write-Host "Running Drizzle Studio on host (requires local Node.js)..."
+    Write-Host "Connects to DB via DATABASE_URL in .env (localhost:$DbPort)"
+    npx drizzle-kit studio
+}
+
+# ── Setup ─────────────────────────────────────────────────────────────────────
+
+function Setup {
+    Write-Host "=== Fluent Platform Setup ==="
+    Write-Host ""
+    Write-Host "Checking sibling repositories..."
+    $allPresent = Test-Repos
+    if (-not $allPresent) {
+        Write-Host ""
+        Write-Host "Missing repositories detected. Clone them with:"
+        foreach ($repo in $Repos) {
+            if (-not (Test-Path $repo.Path)) {
+                Write-Host "  git clone $($repo.Url) $($repo.Path)"
+            }
+        }
+        Write-Host ""
+        $cloneConfirm = Read-Host "Clone missing repos now? [y/N]"
+        if ($cloneConfirm -match "^[Yy]$") {
             foreach ($repo in $Repos) {
                 if (-not (Test-Path $repo.Path)) {
-                    Write-Host "  git clone $($repo.Url) $($repo.Path)"
-                }
-            }
-            Write-Host ""
-            $cloneConfirm = Read-Host "Clone missing repos now? [y/N]"
-            if ($cloneConfirm -match "^[Yy]$") {
-                foreach ($repo in $Repos) {
-                    if (-not (Test-Path $repo.Path)) {
-                        Write-Host "Cloning $($repo.Name)..."
-                        git clone $repo.Url $repo.Path
-                    }
+                    Write-Host "Cloning $($repo.Name)..."
+                    git clone $repo.Url $repo.Path
                 }
             }
         }
-
-        Write-Host ""
-
-        if (-not (Test-Path .env)) {
-            Copy-Item .env.example .env
-            Write-Host "Created .env from .env.example"
-        } else {
-            Write-Host ".env already exists, skipping."
-        }
-
-        foreach ($repo in $Repos) {
-            if ((Test-Path $repo.Path) -and (Test-Path "$($repo.Path)/.env.example") -and (-not (Test-Path "$($repo.Path)/.env"))) {
-                Copy-Item "$($repo.Path)/.env.example" "$($repo.Path)/.env"
-                Write-Host "Created $($repo.Path)/.env from .env.example"
-            }
-        }
-
-        Write-Host ""
-        Write-Host "Setup complete. Next steps:"
-        Write-Host "  1. Fill in credentials in each .env file (Auth0, etc.)"
-        Write-Host "  2. Run: .\fluent.ps1 up"
     }
-    default {
-        @"
-Usage: .\fluent.ps1 <command> [args]
+    Write-Host ""
+    if (-not (Test-Path .env)) {
+        Copy-Item .env.example .env
+        Write-Host "Created .env from .env.example"
+    } else {
+        Write-Host ".env already exists, skipping."
+    }
+    foreach ($repo in $Repos) {
+        if ((Test-Path $repo.Path) -and (Test-Path "$($repo.Path)/.env.example") -and (-not (Test-Path "$($repo.Path)/.env"))) {
+            Copy-Item "$($repo.Path)/.env.example" "$($repo.Path)/.env"
+            Write-Host "Created $($repo.Path)/.env from .env.example"
+        }
+    }
+    Write-Host ""
+    Write-Host "Setup complete. Next steps:"
+    Write-Host "  1. Fill in credentials in each .env file (Auth0, API keys, etc.)"
+    Write-Host "  2. Run: .\fluent.ps1 up"
+}
 
-Services:
-  up [service...]        Start all or specific services
-  down [service...]      Stop all or specific services
-  restart [service...]   Restart specific or all services
-  logs [service]         Tail logs (default: all services)
-  status                 Show container status
-  shell <service>        Open a shell (db opens psql)
-  run <service> <script> Run an npm script in a service container
-  test <service>         Run tests for a service
+# ── Main dispatcher ───────────────────────────────────────────────────────────
+
+Write-Host "Runtime mode: $RuntimeMode"
+if ($RuntimeMode -eq "podman-pod") { Write-Host "Using native Podman pods" }
+else { Write-Host "Using Docker Compose" }
+Write-Host ""
+
+$repos = @("api", "ai", "web", "worker")
+
+if ($repos -contains $Command) {
+    $repoCmd = if ($Args.Count -gt 0) { $Args[0] } else { "up" }
+    $remaining = if ($Args.Count -gt 1) { $Args[1..($Args.Count - 1)] } else { @() }
+    Invoke-RepoCmd -Repo $Command -Cmd $repoCmd -Remaining $remaining
+} else {
+    switch ($Command) {
+        "up"        { Ecosystem-Up -Services $Args }
+        "down"      { Ecosystem-Down -Services $Args }
+        "restart"   { Ecosystem-Restart -Services $Args }
+        "logs"      { Ecosystem-Logs -Services $Args }
+        "status"    { Ecosystem-Status }
+        "shell"     { $svc = if ($Args.Count -gt 0) { $Args[0] } else { "api" }; Ecosystem-Shell $svc }
+        "db:migrate"{ Db-Migrate ($Args[0]) }
+        "db:seed"   { Db-Seed ($Args[0]) }
+        "db:init"   { Db-Init }
+        "db:psql"   { Db-Psql }
+        "db:studio" { Db-Studio }
+        "clean"     { Ecosystem-Clean ($Args[0]) }
+        "fresh"     { Ecosystem-Fresh }
+        "build"     { Ecosystem-Build -Services $Args }
+        "setup"     { Setup }
+        "check-repos" { Test-Repos | Out-Null }
+        default {
+            Write-Host @"
+Usage: .luent.ps1 <command> [args]
+
+Ecosystem commands:
+  up [service...]         Start all services or specific ones
+  down [service...]       Stop all or specific services
+  restart [service...]    Restart services
+  logs [service]          Tail logs (default: all)
+  status                  Show container status
+  shell <service>         Open a shell (db opens psql)
 
 Database:
-  db:migrate [target]    Run migrations (api, ai, or all)
-  db:seed [target]       Run seeds (api, ai, or all)
-  db:init                Run all migrations then all seeds
-  db:studio              Launch Drizzle Studio on the host
-  db:psql                Open psql session
+  db:migrate [target]     Run migrations (api, ai, or all)
+  db:seed [target]        Run seeds (api, ai, or all)
+  db:init                 Run all migrations then all seeds
+  db:psql                 Open psql session
+  db:studio               Launch Drizzle Studio on the host
 
 Lifecycle:
-  clean [service]        Remove containers and volumes (full reset)
-  fresh                  Nuke everything: containers, volumes, and images
-  build [service...]     Rebuild containers without cache
-  check-repos            Verify sibling repos exist
-  setup                  Clone repos, copy .env files, first-time setup
+  clean [service]         Remove containers and volumes
+  fresh                   Destroy everything and rebuild
+  build [service...]      Rebuild images
+  setup                   Clone repos, copy .env files
+  check-repos             Verify sibling repos exist
+
+Repo-specific commands (prefix style):
+  api up                  Start API service
+  api down                Stop API service
+  api restart             Restart API
+  api logs                Tail API logs
+  api shell               Open shell in API container
+  api test                Run API test suite
+  api lint                Run API linter
+  api lint:fix            Run API linter with auto-fix
+  api format              Format API code
+  api format:check        Check API formatting
+  api typecheck           Run API type checker
+  api run <script>        Run an npm script in API
+  api db:migrate          Run API migrations
+  api db:seed             Run API seeds
+  api db:generate <name>  Generate a new migration
+  api db:dump-schema      Dump API schema for fluent-ai sync
+
+  ai up                   Start AI service
+  ai down                 Stop AI service
+  ai restart              Restart AI
+  ai logs                 Tail AI logs
+  ai shell                Open shell in AI container
+  ai test                 Run AI test suite
+  ai lint                 Run AI linter (ruff)
+  ai lint:fix             Run AI linter with auto-fix
+  ai format               Format AI code
+  ai format:check         Check AI formatting
+  ai typecheck            Run AI type checker (mypy)
+  ai run <command>        Run a uv command in AI
+
+  web up                  Start Web service
+  web down                Stop Web service
+  web restart             Restart Web
+  web logs                Tail Web logs
+  web shell               Open shell in Web container
+  web test                Run Web test suite
+  web lint                Run Web linter
+  web lint:fix            Run Web linter with auto-fix
+  web format              Format Web code
+  web format:check        Check Web formatting
+  web typecheck           Run Web type checker
+  web precheck            Run lint + format:check + typecheck + test
+  web preview             Preview production build
+  web run <script>        Run a pnpm script in Web
+
+  worker up               Start Worker service
+  worker down             Stop Worker service
+  worker restart          Restart Worker
+  worker logs             Tail Worker logs
+  worker shell            Open shell in Worker container
 "@
+        }
     }
 }
-
-# Runtime mode display --------------------------------------------------------
-Write-Host "Runtime mode: $RuntimeMode"
-if ($RuntimeMode -eq "podman-pod") {
-    Write-Host "Using native Podman pods"
-} else {
-    Write-Host "Using Docker Compose"
-}
-Write-Host ""

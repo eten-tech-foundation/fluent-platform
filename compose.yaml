@@ -9,7 +9,7 @@ services:
       - "${DB_PORT:-5432}:5432"
     volumes:
       - fluent-pgdata:/var/lib/postgresql/data
-      - ./db/init:/docker-entrypoint-initdb.d
+      - ./db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d fluent"]
       interval: 5s
@@ -90,6 +90,8 @@ services:
       - ${AI_CONTEXT:-../fluent-ai}/pyproject.toml:/app/pyproject.toml:ro
       - ${AI_CONTEXT:-../fluent-ai}/uv.lock:/app/uv.lock:ro
       - ${AI_CONTEXT:-../fluent-ai}/docker-entrypoint.sh:/app/docker-entrypoint.sh:ro
+      - ${AI_CONTEXT:-../fluent-ai}/tests:/app/tests:ro
+      - fluent-ai-logs:/app/logs
     env_file: ${AI_CONTEXT:-../fluent-ai}/.env
     environment:
       DATABASE_URL: "postgresql+asyncpg://postgres:postgres@db:5432/fluent"
@@ -124,10 +126,14 @@ services:
       - ${WEB_CONTEXT:-../fluent-web}/tsconfig.node.json:/app/tsconfig.node.json:ro
       - ${WEB_CONTEXT:-../fluent-web}/components.json:/app/components.json:ro
       - ${WEB_CONTEXT:-../fluent-web}/eslint.config.js:/app/eslint.config.js:ro
+      - ${WEB_CONTEXT:-../fluent-web}/.prettierrc.js:/app/.prettierrc.js:ro
+      - ${WEB_CONTEXT:-../fluent-web}/.prettierignore:/app/.prettierignore:ro
       - ${WEB_CONTEXT:-../fluent-web}/.env:/app/.env:ro
       - fluent-web-node-modules:/app/node_modules
+      - fluent-web-eslintcache:/app/.eslintcache
     environment:
       COREPACK_HOME: /app/.cache/corepack
+      COREPACK_ENABLE_AUTO_PIN: "0"
     user: "1001:1001"
     tmpfs:
       - /tmp:nosuid,size=64m
@@ -145,3 +151,5 @@ volumes:
   fluent-api-node-modules:
   fluent-worker-node-modules:
   fluent-web-node-modules:
+  fluent-ai-logs:
+  fluent-web-eslintcache:
