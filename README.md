@@ -226,7 +226,7 @@ Run linting, formatting, and type checking inside a container using prefix comma
 ./fluent.sh ai typecheck
 ```
 
-## Deployment
+## Deployment (placeholder - not active 2026-05-08)
 
 Azure deployment configurations live in `deploy/azure/`:
 
