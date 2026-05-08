@@ -9,7 +9,7 @@ services:
       - "${DB_PORT:-5432}:5432"
     volumes:
       - fluent-pgdata:/var/lib/postgresql/data
-      - ./db/init:/docker-entrypoint-initdb.d
+      - ./db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d fluent"]
       interval: 5s
@@ -23,12 +23,25 @@ services:
     ports:
       - "${API_PORT:-9999}:9999"
     volumes:
-      - ${API_CONTEXT:-../fluent-api}:/app
-      - /app/node_modules
+      - ${API_CONTEXT:-../fluent-api}/src:/app/src:ro
+      - ${API_CONTEXT:-../fluent-api}/tsconfig.json:/app/tsconfig.json:ro
+      - ${API_CONTEXT:-../fluent-api}/drizzle.config.ts:/app/drizzle.config.ts:ro
+      - ${API_CONTEXT:-../fluent-api}/docker-entrypoint.sh:/app/docker-entrypoint.sh:ro
+      - fluent-api-node-modules:/app/node_modules
     env_file: ${API_CONTEXT:-../fluent-api}/.env
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/fluent
-    command: sh docker-entrypoint.sh
+      EXPORTS_DIR: /app/exports
+    user: "1001:1001"
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=64m
+      - /app/.cache:noexec,nosuid,size=128m
+      - /app/exports:noexec,nosuid,size=256m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     depends_on:
       db:
         condition: service_healthy
@@ -44,12 +57,24 @@ services:
       context: ${API_CONTEXT:-../fluent-api}
       dockerfile: Dockerfile.dev
     volumes:
-      - ${API_CONTEXT:-../fluent-api}:/app
-      - /app/node_modules
+      - ${API_CONTEXT:-../fluent-api}/src:/app/src:ro
+      - ${API_CONTEXT:-../fluent-api}/tsconfig.json:/app/tsconfig.json:ro
+      - fluent-worker-node-modules:/app/node_modules
     env_file: ${API_CONTEXT:-../fluent-api}/.env
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/fluent
-    command: npx tsx watch src/workers/standalone-worker.ts
+      EXPORTS_DIR: /app/exports
+    command: ["dumb-init", "--", "npx", "tsx", "watch", "src/workers/standalone-worker.ts"]
+    user: "1001:1001"
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=64m
+      - /app/.cache:noexec,nosuid,size=128m
+      - /app/exports:noexec,nosuid,size=256m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     depends_on:
       api:
         condition: service_healthy
@@ -59,13 +84,29 @@ services:
       context: ${AI_CONTEXT:-../fluent-ai}
       dockerfile: Dockerfile.dev
     ports:
-      - "${AI_PORT:-8888}:8888"
+      - "${AI_PORT:-8200}:8200"
     volumes:
-      - ${AI_CONTEXT:-../fluent-ai}:/app
-      - /app/node_modules
+      - ${AI_CONTEXT:-../fluent-ai}/src:/app/src:ro
+      - ${AI_CONTEXT:-../fluent-ai}/pyproject.toml:/app/pyproject.toml:ro
+      - ${AI_CONTEXT:-../fluent-ai}/uv.lock:/app/uv.lock:ro
+      - ${AI_CONTEXT:-../fluent-ai}/docker-entrypoint.sh:/app/docker-entrypoint.sh:ro
+      - ${AI_CONTEXT:-../fluent-ai}/tests:/app/tests:ro
+      - fluent-ai-logs:/app/logs
     env_file: ${AI_CONTEXT:-../fluent-ai}/.env
     environment:
-      DATABASE_URL: postgres://postgres:postgres@db:5432/fluent
+      DATABASE_URL: "postgresql+asyncpg://postgres:postgres@db:5432/fluent"
+      ENVIRONMENT: development
+      DEBUG: "true"
+      UV_CACHE_DIR: /app/.cache/uv
+    user: "1001:1001"
+    read_only: true
+    tmpfs:
+      - /tmp:nosuid,size=64m
+      - /app/.cache:noexec,nosuid,size=128m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     depends_on:
       api:
         condition: service_healthy
@@ -75,15 +116,40 @@ services:
       context: ${WEB_CONTEXT:-../fluent-web}
       dockerfile: Dockerfile.dev
     ports:
-      - "${WEB_PORT:-3000}:3000"
+      - "${WEB_PORT:-5173}:5173"
     volumes:
-      - ${WEB_CONTEXT:-../fluent-web}:/app
-      - /app/node_modules
+      - ${WEB_CONTEXT:-../fluent-web}/src:/app/src
+      - ${WEB_CONTEXT:-../fluent-web}/public:/app/public:ro
+      - ${WEB_CONTEXT:-../fluent-web}/index.html:/app/index.html:ro
+      - ${WEB_CONTEXT:-../fluent-web}/vite.config.ts:/app/vite.config.ts
+      - ${WEB_CONTEXT:-../fluent-web}/tsconfig.json:/app/tsconfig.json:ro
+      - ${WEB_CONTEXT:-../fluent-web}/tsconfig.node.json:/app/tsconfig.node.json:ro
+      - ${WEB_CONTEXT:-../fluent-web}/components.json:/app/components.json:ro
+      - ${WEB_CONTEXT:-../fluent-web}/eslint.config.js:/app/eslint.config.js:ro
+      - ${WEB_CONTEXT:-../fluent-web}/.prettierrc.js:/app/.prettierrc.js:ro
+      - ${WEB_CONTEXT:-../fluent-web}/.prettierignore:/app/.prettierignore:ro
+      - ${WEB_CONTEXT:-../fluent-web}/.env:/app/.env:ro
+      - fluent-web-node-modules:/app/node_modules
+      - fluent-web-eslintcache:/app/.eslintcache
     environment:
-      VITE_API_URL: "http://localhost:${API_PORT:-9999}"
+      COREPACK_HOME: /app/.cache/corepack
+      COREPACK_ENABLE_AUTO_PIN: "0"
+    user: "1001:1001"
+    tmpfs:
+      - /tmp:nosuid,size=64m
+      - /app/.cache:noexec,nosuid,uid=1001,gid=1001,size=128m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     depends_on:
       api:
         condition: service_healthy
 
 volumes:
   fluent-pgdata:
+  fluent-api-node-modules:
+  fluent-worker-node-modules:
+  fluent-web-node-modules:
+  fluent-ai-logs:
+  fluent-web-eslintcache:
