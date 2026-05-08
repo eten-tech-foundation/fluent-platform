@@ -59,6 +59,40 @@ REPO_URLS=(
   "git@github.com:eten-tech-foundation/fluent-web.git"
 )
 
+REPO_SCRIPTS=(
+  "fapi.sh"
+  "fai.sh"
+  "fweb.sh"
+)
+
+# ── Repo script delegation ──────────────────────────────────────────────────
+
+run_repo_script() {
+  local repo="$1"
+  shift
+  local ctx
+  ctx=$(repo_context "$repo")
+  if [ -z "$ctx" ]; then
+    echo_error "Unknown repo: $repo"
+    exit 1
+  fi
+  local idx
+  case "$repo" in
+    api|worker) idx=0 ;;
+    ai)         idx=1 ;;
+    web)        idx=2 ;;
+    *)          echo_error "Unknown repo: $repo"; exit 1 ;;
+  esac
+  FLUENT_ECOSYSTEM=1 \
+    FLUENT_POD_NAME="$POD_NAME" \
+    FLUENT_CONTAINER_PREFIX="fluent-" \
+    FLUENT_DB_PORT="$DB_PORT" \
+    FLUENT_API_PORT="$API_PORT" \
+    FLUENT_AI_PORT="$AI_PORT" \
+    FLUENT_WEB_PORT="$WEB_PORT" \
+    "$ctx/${REPO_SCRIPTS[$idx]}" "$@"
+}
+
 # ── Repo helpers ──────────────────────────────────────────────────────────────
 
 check_repos() {
@@ -136,23 +170,6 @@ wait_for_db() {
   echo_success "Database is ready"
 }
 
-wait_for_api() {
-  echo_running "Waiting for API to be ready..."
-  local retries=30
-  while [ "$retries" -gt 0 ]; do
-    if curl -sf "http://localhost:${API_PORT}/health" 2>/dev/null; then
-      echo_success "API is ready"
-      return
-    fi
-    retries=$((retries - 1))
-    echo -n "."
-    sleep 3
-  done
-  echo ""
-  echo_error "API did not become healthy in time"
-  exit 1
-}
-
 # ── Podman container lifecycle ────────────────────────────────────────────────
 
 start_db_container() {
@@ -177,171 +194,19 @@ start_db_container() {
   echo_success "Database container started"
 }
 
-start_api_container() {
-  if $RUNTIME container exists fluent-api 2>/dev/null; then
-    echo_success "API container already exists"
-    return
-  fi
-  if [ ! -d "$API_CONTEXT" ]; then
-    echo_error "API context not found: $API_CONTEXT"
-    exit 1
-  fi
-  echo_running "Building API image..."
-  $RUNTIME build -t fluent-api "$API_CONTEXT" -f Dockerfile.dev
-  local -a env_flags=(
-    -e "NODE_ENV=development"
-    -e "DATABASE_URL=postgres://postgres:postgres@localhost:5432/fluent"
-    -e "EXPORTS_DIR=/app/exports"
-  )
-  if [[ -f "$API_CONTEXT/.env" ]]; then
-    env_flags+=(--env-file "$API_CONTEXT/.env")
-  fi
-  echo_running "Starting API container..."
-  $RUNTIME run -d \
-    --name fluent-api \
-    --pod "$POD_NAME" \
-    "${env_flags[@]}" \
-    -v "$API_CONTEXT/src:/app/src:ro" \
-    -v "$API_CONTEXT/tsconfig.json:/app/tsconfig.json:ro" \
-    -v "$API_CONTEXT/drizzle.config.ts:/app/drizzle.config.ts:ro" \
-    -v "$API_CONTEXT/docker-entrypoint.sh:/app/docker-entrypoint.sh:ro" \
-    -v fluent-api-node-modules:/app/node_modules \
-    --tmpfs /tmp:noexec,nosuid,size=64m \
-    --tmpfs /app/.cache:noexec,nosuid,size=128m \
-    --tmpfs /app/exports:noexec,nosuid,size=256m \
-    --security-opt no-new-privileges:true \
-    --cap-drop ALL \
-    --user 1001:1001 \
-    --read-only \
-    --health-cmd "curl -f http://localhost:9999/health" \
-    --health-interval 10s \
-    --health-timeout 5s \
-    --health-retries 5 \
-    --health-start-period 15s \
-    fluent-api
-  echo_success "API container started"
-}
+# ── Ecosystem commands (Podman) ───────────────────────────────────────────────
 
-start_worker_container() {
-  if $RUNTIME container exists fluent-worker 2>/dev/null; then
-    echo_success "Worker container already exists"
-    return
-  fi
-  local -a env_flags=(
-    -e "NODE_ENV=development"
-    -e "DATABASE_URL=postgres://postgres:postgres@localhost:5432/fluent"
-    -e "EXPORTS_DIR=/app/exports"
-  )
-  if [[ -f "$API_CONTEXT/.env" ]]; then
-    env_flags+=(--env-file "$API_CONTEXT/.env")
-  fi
-  echo_running "Starting worker container..."
-  $RUNTIME run -d \
-    --name fluent-worker \
-    --pod "$POD_NAME" \
-    "${env_flags[@]}" \
-    -v "$API_CONTEXT/src:/app/src:ro" \
-    -v "$API_CONTEXT/tsconfig.json:/app/tsconfig.json:ro" \
-    -v fluent-worker-node-modules:/app/node_modules \
-    --tmpfs /tmp:noexec,nosuid,size=64m \
-    --tmpfs /app/.cache:noexec,nosuid,size=128m \
-    --tmpfs /app/exports:noexec,nosuid,size=256m \
-    --security-opt no-new-privileges:true \
-    --cap-drop ALL \
-    --user 1001:1001 \
-    --read-only \
-    fluent-api \
-    dumb-init -- npx tsx watch src/workers/standalone-worker.ts
-  echo_success "Worker container started"
+podman_up() {
+  echo_running "Starting services with Podman..."
+  create_volumes
+  pod_create
+  start_db_container
+  wait_for_db
+  run_repo_script api up
+  run_repo_script ai up
+  run_repo_script web up
+  echo_success "All services started!"
 }
-
-start_ai_container() {
-  if $RUNTIME container exists fluent-ai 2>/dev/null; then
-    echo_success "AI container already exists"
-    return
-  fi
-  if [ ! -d "$AI_CONTEXT" ]; then
-    echo_error "AI context not found: $AI_CONTEXT"
-    exit 1
-  fi
-  echo_running "Building AI image..."
-  $RUNTIME build -t fluent-ai "$AI_CONTEXT" -f Dockerfile.dev
-  local -a env_flags=(
-    -e "DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/fluent"
-    -e "ENVIRONMENT=development"
-    -e "DEBUG=true"
-    -e "UV_CACHE_DIR=/app/.cache/uv"
-  )
-  if [[ -f "$AI_CONTEXT/.env" ]]; then
-    env_flags+=(--env-file "$AI_CONTEXT/.env")
-  fi
-  echo_running "Starting AI container..."
-  $RUNTIME run -d \
-    --name fluent-ai \
-    --pod "$POD_NAME" \
-    "${env_flags[@]}" \
-    -v "$AI_CONTEXT/src:/app/src:ro" \
-    -v "$AI_CONTEXT/tests:/app/tests:ro" \
-    -v "$AI_CONTEXT/pyproject.toml:/app/pyproject.toml:ro" \
-    -v "$AI_CONTEXT/uv.lock:/app/uv.lock:ro" \
-    -v "$AI_CONTEXT/docker-entrypoint.sh:/app/docker-entrypoint.sh:ro" \
-    -v fluent-ai-logs:/app/logs \
-    --tmpfs /tmp:nosuid,size=64m \
-    --tmpfs /app/.cache:noexec,nosuid,size=128m \
-    --security-opt no-new-privileges:true \
-    --cap-drop ALL \
-    --user 1001:1001 \
-    --read-only \
-    fluent-ai
-  echo_success "AI container started"
-}
-
-start_web_container() {
-  if $RUNTIME container exists fluent-web 2>/dev/null; then
-    echo_success "Web container already exists"
-    return
-  fi
-  if [ ! -d "$WEB_CONTEXT" ]; then
-    echo_error "Web context not found: $WEB_CONTEXT"
-    exit 1
-  fi
-  echo_running "Building Web image..."
-  $RUNTIME build -t fluent-web "$WEB_CONTEXT" -f Dockerfile.dev
-  local -a env_flags=(
-    -e "COREPACK_HOME=/app/.cache/corepack"
-    -e "COREPACK_ENABLE_AUTO_PIN=0"
-    -e "VITE_API_URL=http://localhost:${API_PORT}"
-  )
-  if [[ -f "$WEB_CONTEXT/.env" ]]; then
-    env_flags+=(--env-file "$WEB_CONTEXT/.env")
-  fi
-  echo_running "Starting Web container..."
-  $RUNTIME run -d \
-    --name fluent-web \
-    --pod "$POD_NAME" \
-    "${env_flags[@]}" \
-    -v "$WEB_CONTEXT/src:/app/src" \
-    -v "$WEB_CONTEXT/public:/app/public:ro" \
-    -v "$WEB_CONTEXT/index.html:/app/index.html:ro" \
-    -v "$WEB_CONTEXT/vite.config.ts:/app/vite.config.ts" \
-    -v "$WEB_CONTEXT/tsconfig.json:/app/tsconfig.json:ro" \
-    -v "$WEB_CONTEXT/tsconfig.node.json:/app/tsconfig.node.json:ro" \
-    -v "$WEB_CONTEXT/components.json:/app/components.json:ro" \
-    -v "$WEB_CONTEXT/eslint.config.js:/app/eslint.config.js:ro" \
-    -v "$WEB_CONTEXT/.prettierrc.js:/app/.prettierrc.js:ro" \
-    -v "$WEB_CONTEXT/.prettierignore:/app/.prettierignore:ro" \
-    -v "$WEB_CONTEXT/.env:/app/.env:ro" \
-    -v fluent-web-node-modules:/app/node_modules \
-    -v fluent-web-eslintcache:/app/.eslintcache \
-    --tmpfs /tmp:nosuid,size=64m \
-    --tmpfs /app/.cache:noexec,nosuid,uid=1001,gid=1001,size=128m \
-    --security-opt no-new-privileges:true \
-    --cap-drop ALL \
-    --user 1001:1001 \
-    fluent-web
-  echo_success "Web container started"
-}
-# ── Ecosystem commands (Docker Compose) ───────────────────────────────────────
 
 compose_up() {
   local services=("$@")
@@ -420,20 +285,6 @@ compose_build() {
 
 # ── Ecosystem commands (Podman) ───────────────────────────────────────────────
 
-podman_up() {
-  echo_running "Starting services with Podman..."
-  create_volumes
-  pod_create
-  start_db_container
-  wait_for_db
-  start_api_container
-  wait_for_api
-  start_worker_container
-  start_ai_container
-  start_web_container
-  echo_success "All services started!"
-}
-
 podman_down() {
   echo_running "Stopping services..."
   pod_destroy
@@ -450,14 +301,7 @@ podman_restart() {
     for service in "${services[@]}"; do
       echo_running "Restarting $service..."
       $RUNTIME rm -f "fluent-$service" 2>/dev/null || true
-      case "$service" in
-        db)     start_db_container ;;
-        api)    start_api_container ;;
-        worker) start_worker_container ;;
-        ai)     start_ai_container ;;
-        web)    start_web_container ;;
-        *)      echo_error "Unknown service: $service" ;;
-      esac
+      run_repo_script "$service" up
     done
     echo_success "Restarted services: ${services[*]}"
   fi
@@ -541,17 +385,8 @@ repo_up() {
     pod_create
     start_db_container
     wait_for_db
-    case "$repo" in
-      db)     : ;;  # already started
-      api)    start_api_container ; wait_for_api ;;
-      worker) start_api_container; wait_for_api; start_worker_container ;;
-      ai)     start_api_container; wait_for_api; start_ai_container ;;
-      web)    start_api_container; wait_for_api; start_web_container ;;
-    esac
-    echo_success "$repo started"
-  else
-    $COMPOSE_CMD up -d --build "$repo"
   fi
+  run_repo_script "$repo" up
 }
 
 repo_down() {
@@ -567,13 +402,7 @@ repo_restart() {
   local repo="$1"
   if [ "$RUNTIME_MODE" = "podman-pod" ]; then
     $RUNTIME rm -f "fluent-$repo" 2>/dev/null || true
-    case "$repo" in
-      db)     start_db_container ;;
-      api)    start_api_container ; wait_for_api ;;
-      worker) start_worker_container ;;
-      ai)     start_ai_container ;;
-      web)    start_web_container ;;
-    esac
+    run_repo_script "$repo" up
   else
     $COMPOSE_CMD restart "$repo"
   fi
@@ -613,98 +442,30 @@ handle_repo_cmd() {
     exit 1
   fi
 
-  case "$repo" in
-    api)
-      case "$cmd" in
-        up)           repo_up api ;;
-        down)         repo_down api ;;
-        restart)      repo_restart api ;;
-        logs)         repo_logs api ;;
-        shell)        repo_shell api ;;
-        test)         repo_exec api npm run test "$@" ;;
-        lint)         repo_exec api npm run lint ;;
-        lint:fix)     repo_exec api npm run lint:fix ;;
-        format)       repo_exec api npm run format ;;
-        format:check) repo_exec api npm run format:check ;;
-        typecheck)    repo_exec api npm run typecheck ;;
-        run)          repo_exec api npm run "$@" ;;
-        db:migrate)   repo_exec api npx drizzle-kit migrate ;;
-        db:seed)
-          repo_exec api npx tsx src/db/seeds/roles.ts
-          repo_exec api npx tsx src/db/seeds/rbac.ts
-          ;;
-        db:generate)
-          local name="${1:?Usage: fluent.sh api db:generate <name>}"
-          repo_exec api npx drizzle-kit generate --name "$name"
-          ;;
-        db:dump-schema)
-          local output="${1:-}"
-          if [ -z "$output" ]; then
-            output="$SCRIPT_DIR/db/schema-dump.sql"
-          fi
-          echo_running "Dumping API public schema to $output..."
-          {
-            echo "-- Schema-only dump of fluent-api public tables."
-            echo "-- Auto-generated. Regenerate with: ./fluent.sh api db:dump-schema [path]"
-            if [ "$RUNTIME_MODE" = "podman-pod" ]; then
-              $RUNTIME exec fluent-db pg_dump -U postgres --schema-only --schema=public fluent
-            else
-              $COMPOSE_CMD exec -T db pg_dump -U postgres --schema-only --schema=public fluent
-            fi
-          } > "$output"
-          echo_success "Schema dumped to $output"
-          ;;
-        *)            echo_error "Unknown api command: $cmd"; exit 1 ;;
-      esac
+  case "$cmd" in
+    up)           repo_up "$repo" ;;
+    down)         repo_down "$repo" ;;
+    restart)      repo_restart "$repo" ;;
+    logs)         repo_logs "$repo" ;;
+    shell)        repo_shell "$repo" ;;
+    db:dump-schema)
+      local output="${1:-}"
+      if [ -z "$output" ]; then
+        output="$SCRIPT_DIR/db/schema-dump.sql"
+      fi
+      echo_running "Dumping API public schema to $output..."
+      {
+        echo "-- Schema-only dump of fluent-api public tables."
+        echo "-- Auto-generated. Regenerate with: ./fluent.sh api db:dump-schema [path]"
+        if [ "$RUNTIME_MODE" = "podman-pod" ]; then
+          $RUNTIME exec fluent-db pg_dump -U postgres --schema-only --schema=public fluent
+        else
+          $COMPOSE_CMD exec -T db pg_dump -U postgres --schema-only --schema=public fluent
+        fi
+      } > "$output"
+      echo_success "Schema dumped to $output"
       ;;
-    ai)
-      case "$cmd" in
-        up)           repo_up ai ;;
-        down)         repo_down ai ;;
-        restart)      repo_restart ai ;;
-        logs)         repo_logs ai ;;
-        shell)        repo_shell ai ;;
-        test)         repo_exec ai uv run pytest tests/ -v "$@" ;;
-        lint)         repo_exec ai uv run ruff check ;;
-        lint:fix)     repo_exec ai uv run ruff check --fix ;;
-        format)       repo_exec ai uv run ruff format ;;
-        format:check) repo_exec ai uv run ruff format --check ;;
-        typecheck)    repo_exec ai uv run mypy src ;;
-        run)          repo_exec ai uv run "$@" ;;
-        db:migrate)   echo "(no migrations configured yet)" ;;
-        db:seed)      echo "(no seeds configured yet)" ;;
-        *)            echo_error "Unknown ai command: $cmd"; exit 1 ;;
-      esac
-      ;;
-    web)
-      case "$cmd" in
-        up)           repo_up web ;;
-        down)         repo_down web ;;
-        restart)      repo_restart web ;;
-        logs)         repo_logs web ;;
-        shell)        repo_shell web ;;
-        test)         repo_exec web pnpm test "$@" ;;
-        lint)         repo_exec web pnpm lint ;;
-        lint:fix)     repo_exec web pnpm lint:fix ;;
-        format)       repo_exec web pnpm format ;;
-        format:check) repo_exec web pnpm format:check ;;
-        typecheck)    repo_exec web pnpm typecheck ;;
-        precheck)     repo_exec web pnpm precheck ;;
-        preview)      repo_exec web pnpm preview ;;
-        run)          repo_exec web pnpm "$@" ;;
-        *)            echo_error "Unknown web command: $cmd"; exit 1 ;;
-      esac
-      ;;
-    worker)
-      case "$cmd" in
-        up)           repo_up worker ;;
-        down)         repo_down worker ;;
-        restart)      repo_restart worker ;;
-        logs)         repo_logs worker ;;
-        shell)        repo_shell worker ;;
-        *)            echo_error "Worker does not support '$cmd'. Use 'api' for dev commands."; exit 1 ;;
-      esac
-      ;;
+    *)            run_repo_script "$repo" "$cmd" "$@" ;;
   esac
 }
 # ── Ecosystem database commands ─────────────────────────────────────────────
@@ -864,12 +625,7 @@ ecosystem_build() {
   if [ "$RUNTIME_MODE" = "podman-pod" ]; then
     echo_running "Building specified images: ${services[*]}"
     for service in "${services[@]}"; do
-      case "$service" in
-        api|worker) $RUNTIME build -t fluent-api "$API_CONTEXT" -f Dockerfile.dev ;;
-        ai)         $RUNTIME build -t fluent-ai "$AI_CONTEXT" -f Dockerfile.dev ;;
-        web)        $RUNTIME build -t fluent-web "$WEB_CONTEXT" -f Dockerfile.dev ;;
-        *)          echo_error "Unknown buildable service: $service"; exit 1 ;;
-      esac
+      run_repo_script "$service" build
     done
   else
     if [ ${#services[@]} -eq 0 ]; then
