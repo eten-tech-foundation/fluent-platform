@@ -139,6 +139,7 @@ pod_create() {
   $RUNTIME pod create \
     --name "$POD_NAME" \
     --share "net,ipc,uts" \
+    --network=slirp4netns \
     -p "${DB_PORT}:5432" \
     -p "${API_PORT}:9999" \
     -p "${AI_PORT}:8200" \
