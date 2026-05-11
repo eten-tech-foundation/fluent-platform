@@ -830,5 +830,5 @@ if [ "$cmd" = "api" ] || [ "$cmd" = "ai" ] || [ "$cmd" = "web" ] || [ "$cmd" = "
   shift || true
   handle_repo_cmd "$repo" "$repo_cmd" "$@"
 else
-  handle_ecosystem "$cmd" "$@"
+  handle_ecosystem "$@"
 fi
