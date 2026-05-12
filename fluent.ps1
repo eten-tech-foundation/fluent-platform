@@ -102,13 +102,14 @@ function Ecosystem-Up {
         & $ContainerCmd volume create fluent-api-node-modules 2>$null | Out-Null
         & $ContainerCmd volume create fluent-worker-node-modules 2>$null | Out-Null
         & $ContainerCmd volume create fluent-web-node-modules 2>$null | Out-Null
+        & $ContainerCmd volume create fluent-web-cache 2>$null | Out-Null
         & $ContainerCmd volume create fluent-ai-logs 2>$null | Out-Null
         & $ContainerCmd volume create fluent-web-eslintcache 2>$null | Out-Null
 
         $existing = & $ContainerCmd pod exists $PodName 2>$null
         if ($LASTEXITCODE -ne 0) {
             Write-Running "Creating pod $PodName..."
-            & $ContainerCmd pod create --name $PodName --share "net,ipc,uts" `
+            & $ContainerCmd pod create --name $PodName --share "net,ipc,uts" --network=slirp4netns `
                 -p "${DbPort}:5432" -p "${ApiPort}:9999" -p "${AiPort}:8200" -p "${WebPort}:5173"
         }
 
@@ -195,8 +196,9 @@ function Ecosystem-Up {
                         -v "$WebContext/.prettierignore:/app/.prettierignore:ro" `
                         -v "$WebContext/.env:/app/.env:ro" `
                         -v fluent-web-node-modules:/app/node_modules `
+                        -v fluent-web-cache:/app/.cache `
                         -v fluent-web-eslintcache:/app/.eslintcache `
-                        --tmpfs /tmp:nosuid,size=64m --tmpfs /app/.cache:noexec,nosuid,uid=1001,gid=1001,size=128m `
+                        --tmpfs /tmp:nosuid,size=64m `
                         --security-opt no-new-privileges:true --cap-drop ALL --user 1001:1001 fluent-web
                 }
             }
@@ -290,7 +292,7 @@ function Ecosystem-Clean {
         if ($RuntimeMode -eq "podman-pod") {
             if ($Target -eq "all") {
                 & $ContainerCmd pod rm $PodName -f 2>$null | Out-Null
-                & $ContainerCmd volume rm fluent-pgdata fluent-api-node-modules fluent-worker-node-modules fluent-web-node-modules fluent-ai-logs fluent-web-eslintcache 2>$null | Out-Null
+                & $ContainerCmd volume rm fluent-pgdata fluent-api-node-modules fluent-worker-node-modules fluent-web-node-modules fluent-web-cache fluent-ai-logs fluent-web-eslintcache 2>$null | Out-Null
                 Write-Success "All containers and volumes removed"
             } else {
                 & $ContainerCmd rm -f "fluent-$Target" 2>$null | Out-Null
@@ -582,7 +584,7 @@ if ($repos -contains $Command) {
         "check-repos" { Test-Repos | Out-Null }
         default {
             Write-Host @"
-Usage: .luent.ps1 <command> [args]
+Usage: .\fluent.ps1 <command> [args]
 
 Ecosystem commands:
   up [service...]         Start all services or specific ones
