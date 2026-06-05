@@ -24,6 +24,7 @@ services:
       - "${API_PORT:-9999}:9999"
     volumes:
       - ${API_CONTEXT:-../fluent-api}/src:/app/src:ro
+      - ${API_CONTEXT:-../fluent-api}/scripts:/app/scripts:ro
       - ${API_CONTEXT:-../fluent-api}/tsconfig.json:/app/tsconfig.json:ro
       - ${API_CONTEXT:-../fluent-api}/drizzle.config.ts:/app/drizzle.config.ts:ro
       - ${API_CONTEXT:-../fluent-api}/docker-entrypoint.sh:/app/docker-entrypoint.sh:ro
@@ -32,6 +33,13 @@ services:
     environment:
       DATABASE_URL: postgres://postgres:postgres@db:5432/fluent
       EXPORTS_DIR: /app/exports
+      # fluent-ai is reachable by service name on the shared compose network.
+      # Override here so ecosystem mode works regardless of the standalone
+      # value in fluent-api/.env (which targets http://localhost:8200).
+      # FLUENT_AI_KEY is intentionally NOT overridden — it is a shared secret
+      # sourced from fluent-api/.env so the caller key and fluent-ai's
+      # ai_api_keys seed stay in lockstep. See fluent-api proposal §12.4 / D12.
+      FLUENT_AI_URL: http://ai:8200
     user: "1001:1001"
     read_only: true
     tmpfs:
@@ -95,13 +103,25 @@ services:
     env_file: ${AI_CONTEXT:-../fluent-ai}/.env
     environment:
       DATABASE_URL: "postgresql+asyncpg://postgres:postgres@db:5432/fluent"
+      # Override MIGRATIONS_DATABASE_URL so it matches the password the platform
+      # DB's db/init/init-db.sql actually assigns to the `migrations` role
+      # (`postgres`). fluent-ai/.env defaults this to `migrations:password`,
+      # which only matches the *standalone* fluent-ai DB init script; on the
+      # platform DB it causes asyncpg InvalidPasswordError and the ai container
+      # exits on the Alembic step. The platform already overrides DATABASE_URL
+      # for the same reason but historically missed this one.
+      MIGRATIONS_DATABASE_URL: "postgresql+asyncpg://migrations:postgres@db:5432/fluent"
       ENVIRONMENT: development
       DEBUG: "true"
-      UV_CACHE_DIR: /app/.cache/uv
+      # The default fluent-ai value (/app/.cache/uv) lands on the noexec tmpfs
+      # mounted at /app/.cache below, so uv fails to initialize its cache
+      # ("Permission denied"). Point it at the writable /tmp tmpfs instead,
+      # matching what the standalone fluent-ai/compose.yaml already does.
+      UV_CACHE_DIR: /tmp/.uv-cache
     user: "1001:1001"
     read_only: true
     tmpfs:
-      - /tmp:nosuid,size=64m
+      - /tmp:nosuid,size=256m
       - /app/.cache:noexec,nosuid,size=128m
     security_opt:
       - no-new-privileges:true
