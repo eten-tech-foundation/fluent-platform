@@ -114,8 +114,7 @@ services:
       DEBUG: "true"
       # The default fluent-ai value (/app/.cache/uv) lands on the noexec tmpfs
       # mounted at /app/.cache below, so uv fails to initialize its cache
-      # ("Permission denied"). Point it at the writable /tmp tmpfs instead,
-      # matching what the standalone fluent-ai/compose.yaml already does.
+      # ("Permission denied"). Point it at the writable /tmp tmpfs instead.
       UV_CACHE_DIR: /tmp/.uv-cache
     user: "1001:1001"
     read_only: true
