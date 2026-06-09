@@ -13,10 +13,11 @@ running their own migrations (Drizzle, Alembic) and seeds on startup.
 
 ## Standalone mode
 
-In standalone mode (`./fapi.sh up`, `./fai.sh up`), each service's own
-`compose.yaml` mounts its `db/init/` scripts into the postgres
-`docker-entrypoint-initdb.d` directory, creating service-specific users and
-schemas on the first container start.
+In standalone mode (`./fapi.sh up`, `./fai.sh up`), the postgres container also
+starts superuser-only. The service self-provisions on startup exactly as in
+ecosystem mode: its bootstrap step creates its own roles and schemas
+idempotently, then runs its migrations and seeds. Nothing is mounted into
+`docker-entrypoint-initdb.d`.
 
 ## Shared resources
 
