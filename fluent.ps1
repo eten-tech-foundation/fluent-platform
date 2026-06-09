@@ -437,12 +437,15 @@ function Db-Migrate {
         }
         "ai" {
             Write-Running "Running fluent-ai migrations..."
-            Write-Host "  (no migrations configured yet)"
+            Invoke-Exec "ai" @("uv", "run", "alembic", "upgrade", "head")
+            Write-Success "AI migrations completed"
         }
         "all" {
             $confirm = Read-Host "Run migrations for all services? [y/N]"
-            if ($confirm -match "^[Yy]$") { Db-Migrate "api" }
-            else { Write-Host "Aborted." }
+            if ($confirm -match "^[Yy]$") {
+                Db-Migrate "api"
+                Db-Migrate "ai"
+            } else { Write-Host "Aborted." }
         }
         default { Write-Error-Color "Unknown migrate target: $Target"; exit 1 }
     }
@@ -459,12 +462,15 @@ function Db-Seed {
         }
         "ai" {
             Write-Running "Running fluent-ai seeds..."
-            Write-Host "  (no seeds configured yet)"
+            Invoke-Exec "ai" @("env", "PYTHONPATH=/app/src", "uv", "run", "python", "-m", "app.db.seeds")
+            Write-Success "AI seeds completed"
         }
         "all" {
             $confirm = Read-Host "Run seeds for all services? [y/N]"
-            if ($confirm -match "^[Yy]$") { Db-Seed "api" }
-            else { Write-Host "Aborted." }
+            if ($confirm -match "^[Yy]$") {
+                Db-Seed "api"
+                Db-Seed "ai"
+            } else { Write-Host "Aborted." }
         }
         default { Write-Error-Color "Unknown seed target: $Target"; exit 1 }
     }
@@ -472,10 +478,10 @@ function Db-Seed {
 
 function Db-Init {
     Write-Running "Full database initialization (migrations + seeds)..."
-    $confirm = Read-Host "Continue? [y/N]"
+    $confirm = Read-Host "This will run all migrations and seeds. Continue? [y/N]"
     if ($confirm -match "^[Yy]$") {
-        Db-Migrate "api"
-        Db-Seed "api"
+        Invoke-Exec "api" @("npm", "run", "db:setup")
+        Invoke-Exec "ai" @("env", "PYTHONPATH=/app/src", "uv", "run", "python", "src/app/db/scripts/setup.py")
         Write-Success "Database initialization complete."
     } else {
         Write-Host "Aborted."

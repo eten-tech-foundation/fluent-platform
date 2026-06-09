@@ -467,12 +467,18 @@ db_migrate() {
       ;;
     ai)
       echo_running "Running fluent-ai migrations..."
-      echo "  (no migrations configured yet)"
+      if [ "$RUNTIME_MODE" = "podman-pod" ]; then
+        repo_exec ai uv run alembic upgrade head
+      else
+        $COMPOSE_CMD exec ai uv run alembic upgrade head
+      fi
+      echo_success "AI migrations completed"
       ;;
     all)
       read -rp "Run migrations for all services? [y/N] " confirm
       if [[ "$confirm" =~ ^[Yy]$ ]]; then
         db_migrate api
+        db_migrate ai
       else
         echo "Aborted."
       fi
@@ -504,12 +510,18 @@ db_seed() {
       ;;
     ai)
       echo_running "Running fluent-ai seeds..."
-      echo "  (no seeds configured yet)"
+      if [ "$RUNTIME_MODE" = "podman-pod" ]; then
+        repo_exec ai env PYTHONPATH=/app/src uv run python -m app.db.seeds
+      else
+        $COMPOSE_CMD exec ai env PYTHONPATH=/app/src uv run python -m app.db.seeds
+      fi
+      echo_success "AI seeds completed"
       ;;
     all)
       read -rp "Run seeds for all services? [y/N] " confirm
       if [[ "$confirm" =~ ^[Yy]$ ]]; then
         db_seed api
+        db_seed ai
       else
         echo "Aborted."
       fi
@@ -529,8 +541,13 @@ db_init() {
   echo_running "Full database initialization (migrations + seeds)..."
   read -rp "This will run all migrations and seeds. Continue? [y/N] " confirm
   if [[ "$confirm" =~ ^[Yy]$ ]]; then
-    db_migrate api
-    db_seed api
+    if [ "$RUNTIME_MODE" = "podman-pod" ]; then
+      repo_exec api npm run db:setup
+      repo_exec ai env PYTHONPATH=/app/src uv run python src/app/db/scripts/setup.py
+    else
+      $COMPOSE_CMD exec api npm run db:setup
+      $COMPOSE_CMD exec ai env PYTHONPATH=/app/src uv run python src/app/db/scripts/setup.py
+    fi
     echo_success "Database initialization complete."
   else
     echo "Aborted."
