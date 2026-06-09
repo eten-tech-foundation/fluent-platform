@@ -9,7 +9,6 @@ services:
       - "${DB_PORT:-5432}:5432"
     volumes:
       - fluent-pgdata:/var/lib/postgresql/data
-      - ./db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d fluent"]
       interval: 5s
@@ -31,7 +30,9 @@ services:
       - fluent-api-node-modules:/app/node_modules
     env_file: ${API_CONTEXT:-../fluent-api}/.env
     environment:
-      DATABASE_URL: postgres://postgres:postgres@db:5432/fluent
+      BOOTSTRAP_DATABASE_URL: postgres://postgres:postgres@db:5432/fluent
+      MIGRATIONS_DATABASE_URL: postgres://api_migrator:password@db:5432/fluent
+      DATABASE_URL: postgres://api_user:password@db:5432/fluent
       EXPORTS_DIR: /app/exports
       # fluent-ai is reachable by service name on the shared compose network.
       # Override here so ecosystem mode works regardless of the standalone
@@ -70,7 +71,9 @@ services:
       - fluent-worker-node-modules:/app/node_modules
     env_file: ${API_CONTEXT:-../fluent-api}/.env
     environment:
-      DATABASE_URL: postgres://postgres:postgres@db:5432/fluent
+      BOOTSTRAP_DATABASE_URL: postgres://postgres:postgres@db:5432/fluent
+      MIGRATIONS_DATABASE_URL: postgres://api_migrator:password@db:5432/fluent
+      DATABASE_URL: postgres://api_user:password@db:5432/fluent
       EXPORTS_DIR: /app/exports
     command: ["dumb-init", "--", "npx", "tsx", "watch", "src/workers/standalone-worker.ts"]
     user: "1001:1001"
@@ -102,15 +105,9 @@ services:
       - fluent-ai-logs:/app/logs
     env_file: ${AI_CONTEXT:-../fluent-ai}/.env
     environment:
-      DATABASE_URL: "postgresql+asyncpg://postgres:postgres@db:5432/fluent"
-      # Override MIGRATIONS_DATABASE_URL so it matches the password the platform
-      # DB's db/init/init-db.sql actually assigns to the `migrations` role
-      # (`postgres`). fluent-ai/.env defaults this to `migrations:password`,
-      # which only matches the *standalone* fluent-ai DB init script; on the
-      # platform DB it causes asyncpg InvalidPasswordError and the ai container
-      # exits on the Alembic step. The platform already overrides DATABASE_URL
-      # for the same reason but historically missed this one.
-      MIGRATIONS_DATABASE_URL: "postgresql+asyncpg://migrations:postgres@db:5432/fluent"
+      BOOTSTRAP_DATABASE_URL: postgresql://postgres:postgres@db:5432/fluent
+      MIGRATIONS_DATABASE_URL: postgresql+asyncpg://ai_migrator:password@db:5432/fluent
+      DATABASE_URL: postgresql+asyncpg://ai_user:password@db:5432/fluent
       ENVIRONMENT: development
       DEBUG: "true"
       # The default fluent-ai value (/app/.cache/uv) lands on the noexec tmpfs
