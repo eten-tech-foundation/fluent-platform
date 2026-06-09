@@ -186,7 +186,6 @@ start_db_container() {
     -e POSTGRES_PASSWORD=postgres \
     -e POSTGRES_DB=fluent \
     -v fluent-pgdata:/var/lib/postgresql/data \
-    -v "$SCRIPT_DIR/db/init:/docker-entrypoint-initdb.d:ro" \
     --health-cmd "pg_isready -U postgres -d fluent" \
     --health-interval 5s \
     --health-timeout 5s \
@@ -449,23 +448,6 @@ handle_repo_cmd() {
     restart)      repo_restart "$repo" ;;
     logs)         repo_logs "$repo" ;;
     shell)        repo_shell "$repo" ;;
-    db:dump-schema)
-      local output="${1:-}"
-      if [ -z "$output" ]; then
-        output="$SCRIPT_DIR/db/schema-dump.sql"
-      fi
-      echo_running "Dumping API public schema to $output..."
-      {
-        echo "-- Schema-only dump of fluent-api public tables."
-        echo "-- Auto-generated. Regenerate with: ./fluent.sh api db:dump-schema [path]"
-        if [ "$RUNTIME_MODE" = "podman-pod" ]; then
-          $RUNTIME exec fluent-db pg_dump -U postgres --schema-only --schema=public fluent
-        else
-          $COMPOSE_CMD exec -T db pg_dump -U postgres --schema-only --schema=public fluent
-        fi
-      } > "$output"
-      echo_success "Schema dumped to $output"
-      ;;
     *)            run_repo_script "$repo" "$cmd" "$@" ;;
   esac
 }
@@ -779,7 +761,6 @@ Repo-specific commands (prefix style):
   api db:migrate          Run API migrations
   api db:seed             Run API seeds
   api db:generate <name>  Generate a new migration
-  api db:dump-schema      Dump API schema for fluent-ai sync
 
   ai up                   Start AI service
   ai down                 Stop AI service
