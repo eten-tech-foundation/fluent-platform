@@ -98,10 +98,12 @@ services:
       - "${AI_PORT:-8200}:8200"
     volumes:
       - ${AI_CONTEXT:-../fluent-ai}/src:/app/src:ro
+      - ${AI_CONTEXT:-../fluent-ai}/scripts:/app/scripts:ro
+      - ${AI_CONTEXT:-../fluent-ai}/tests:/app/tests:ro
       - ${AI_CONTEXT:-../fluent-ai}/pyproject.toml:/app/pyproject.toml:ro
       - ${AI_CONTEXT:-../fluent-ai}/uv.lock:/app/uv.lock:ro
+      - ${AI_CONTEXT:-../fluent-ai}/alembic.ini:/app/alembic.ini:ro
       - ${AI_CONTEXT:-../fluent-ai}/docker-entrypoint.sh:/app/docker-entrypoint.sh:ro
-      - ${AI_CONTEXT:-../fluent-ai}/tests:/app/tests:ro
       - fluent-ai-logs:/app/logs
     env_file: ${AI_CONTEXT:-../fluent-ai}/.env
     environment:
