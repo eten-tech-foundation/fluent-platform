@@ -749,9 +749,9 @@ Ecosystem commands:
   shell <service>           Open a shell (db opens psql)
 
 Database:
+  db:init                 Run all migrations then all seeds
   db:migrate [target]     Run migrations (api, ai, or all)
   db:seed [target]        Run seeds (api, ai, or all)
-  db:init                 Run all migrations then all seeds
   db:psql                 Open psql session
   db:studio               Launch Drizzle Studio on the host
 
