@@ -123,7 +123,6 @@ Run development, test, and database commands inside a specific service container
 ./fluent.sh api db:migrate    # Run API migrations
 ./fluent.sh api db:seed       # Run API seeds
 ./fluent.sh api db:generate <name>   # Generate a new migration
-./fluent.sh api db:dump-schema       # Dump API schema for fluent-ai sync
 
 # AI
 ./fluent.sh ai up             # Start AI service
@@ -187,16 +186,18 @@ Each sibling repo also has its own `.env.example` - the `setup` command copies t
 
 ## Database Architecture
 
-The platform owns a single shared PostgreSQL instance initialized by `db/init/init-db.sql`. It uses a multi-schema design with role-based access control:
+The platform runs one shared PostgreSQL database (`fluent`). Each service owns its
+own roles, schemas, and migrations and provisions itself on startup (bootstrap →
+migrate → seed). There are no cross-schema reads.
 
-| Schema     | Purpose                        | Write Access       | Read Access          |
-|------------|--------------------------------|--------------------|----------------------|
-| `public`   | Core application data          | web_user           | web_user, ai_user    |
-| `pgboss`   | Job queue (pg-boss)            | web_user, ai_user  | web_user, ai_user    |
-| `ai`       | AI service data                | ai_user            | ai_user              |
-| `drizzle`  | Migration tracking             | migrations         | migrations           |
+| Schema    | Owner / migrator | Runtime role | Notes                         |
+|-----------|------------------|--------------|-------------------------------|
+| public    | api_migrator     | api_user     | Core API data (Drizzle)       |
+| pgboss    | api_user         | api_user     | API-internal job queue        |
+| drizzle   | api_migrator     | api_migrator | Drizzle migration tracking    |
+| ai        | ai_migrator      | ai_user      | AI service data (Alembic)     |
 
-Login users: `db_admin`, `migrations`, `web_user`, `ai_user`. The init script sets up all roles, schemas, and default privileges automatically on first run.
+Services communicate over HTTP (`FLUENT_AI_URL`), never by reading each other's tables.
 
 ## Container Security
 

@@ -32,9 +32,9 @@ The platform (`fluent-platform`) is a thin orchestrator over the self-containeri
 
 ### Shared Database Model
 
-The platform owns a single shared PostgreSQL container on port 5432. All services connect to it via the internal network (Docker Compose) or the shared pod network (Podman). The database is initialized by `db/init/init-db.sql` on first run, which creates roles, schemas, and default privileges.
+The platform owns a single shared PostgreSQL container on port 5432. All services connect to it via the internal network (Docker Compose) or the shared pod network (Podman). The database starts **superuser-only** — there is no shared init script. **Each service self-provisions** on startup: an idempotent bootstrap step creates that service's own roles, schema, and grants (as the `postgres` superuser via `BOOTSTRAP_DATABASE_URL`), then the service runs its own migrations (as its migration role) and seeds. `fluent-api` owns `public`/`pgboss`/`drizzle` (roles `api_user`/`api_migrator`); `fluent-ai` owns `ai` (roles `ai_user`/`ai_migrator`). No service reads another's schema — there are no cross-schema reads; API↔AI is HTTP (`FLUENT_AI_URL`). See `fluent-platform/README.md` for the ownership table.
 
-When running an individual repo in standalone mode (`./fapi.sh up`, `./fai.sh up`), that repo brings up its own PostgreSQL container on a non-conflicting port (e.g., 5433 for fluent-ai). This allows isolated development without the full ecosystem.
+When running an individual repo in standalone mode (`./fapi.sh up`, `./fai.sh up`), that repo brings up its own PostgreSQL container on port 5432 and self-provisions the same way. Because the standalone DBs and the platform DB all use host port 5432, run one stack at a time (don't run a standalone service alongside the platform).
 
 ### Ecosystem vs Standalone
 
@@ -42,7 +42,7 @@ When running an individual repo in standalone mode (`./fapi.sh up`, `./fai.sh up
 - Single shared DB managed by `fluent-platform`
 - All services run together with `compose.yaml` (Docker) or the `fluent` pod (Podman)
 - Dev/test commands use prefix style: `./fluent.sh api test`, `./fluent.sh web lint`
-- Database migrations and seeds are run explicitly: `./fluent.sh db:init`
+- Each service provisions its own roles/schema, migrations, and seeds on container start (bootstrap → migrate → seed); there is no shared init step
 
 **Standalone mode** (individual repos):
 - Each repo manages its own DB via its own `compose.yaml` or pod
@@ -52,7 +52,8 @@ When running an individual repo in standalone mode (`./fapi.sh up`, `./fai.sh up
 ### Platform compose.yaml vs Repo compose.yaml
 
 The platform `compose.yaml` is the authoritative ecosystem orchestrator. It:
-- Defines the shared `db` service with healthchecks and init scripts
+- Defines the shared `db` service with healthchecks (no init scripts — starts superuser-only; services self-provision)
+- Injects three DB URLs per service — `BOOTSTRAP_DATABASE_URL` (superuser, for self-provisioning), `MIGRATIONS_DATABASE_URL` (migration role), `DATABASE_URL` (least-privilege runtime role)
 - Defines `api`, `worker`, `ai`, and `web` services with build contexts pointing to sibling repos
 - Establishes `depends_on` chains: `db` healthy -> `api` healthy -> `worker`, `ai`, `web`
 

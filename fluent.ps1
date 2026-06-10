@@ -120,7 +120,6 @@ function Ecosystem-Up {
             & $ContainerCmd run -d --name fluent-db --pod $PodName `
                 -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=fluent `
                 -v fluent-pgdata:/var/lib/postgresql/data `
-                -v "$ScriptDir/db/init:/docker-entrypoint-initdb.d:ro" `
                 --health-cmd "pg_isready -U postgres -d fluent" `
                 --health-interval 5s --health-timeout 5s --health-retries 5 `
                 docker.io/postgres:16-alpine
@@ -141,7 +140,7 @@ function Ecosystem-Up {
                 "api" {
                     Write-Running "Building API image..."
                     & $ContainerCmd build -t fluent-api $ApiContext -f Dockerfile.dev
-                    $envFlags = @("-e","NODE_ENV=development","-e","DATABASE_URL=postgres://postgres:postgres@localhost:5432/fluent","-e","EXPORTS_DIR=/app/exports")
+                    $envFlags = @("-e","NODE_ENV=development","-e","BOOTSTRAP_DATABASE_URL=postgres://postgres:postgres@localhost:5432/fluent","-e","MIGRATIONS_DATABASE_URL=postgres://api_migrator:password@localhost:5432/fluent","-e","DATABASE_URL=postgres://api_user:password@localhost:5432/fluent","-e","EXPORTS_DIR=/app/exports")
                     if (Test-Path "$ApiContext/.env") { $envFlags += @("--env-file","$ApiContext/.env") }
                     & $ContainerCmd run -d --name fluent-api --pod $PodName @envFlags `
                         -v "$ApiContext/src:/app/src:ro" -v "$ApiContext/tsconfig.json:/app/tsconfig.json:ro" `
@@ -155,7 +154,7 @@ function Ecosystem-Up {
                         --health-timeout 5s --health-retries 5 --health-start-period 15s fluent-api
                 }
                 "worker" {
-                    $envFlags = @("-e","NODE_ENV=development","-e","DATABASE_URL=postgres://postgres:postgres@localhost:5432/fluent","-e","EXPORTS_DIR=/app/exports")
+                    $envFlags = @("-e","NODE_ENV=development","-e","BOOTSTRAP_DATABASE_URL=postgres://postgres:postgres@localhost:5432/fluent","-e","MIGRATIONS_DATABASE_URL=postgres://api_migrator:password@localhost:5432/fluent","-e","DATABASE_URL=postgres://api_user:password@localhost:5432/fluent","-e","EXPORTS_DIR=/app/exports")
                     if (Test-Path "$ApiContext/.env") { $envFlags += @("--env-file","$ApiContext/.env") }
                     & $ContainerCmd run -d --name fluent-worker --pod $PodName @envFlags `
                         -v "$ApiContext/src:/app/src:ro" -v "$ApiContext/tsconfig.json:/app/tsconfig.json:ro" `
@@ -168,7 +167,7 @@ function Ecosystem-Up {
                 "ai" {
                     Write-Running "Building AI image..."
                     & $ContainerCmd build -t fluent-ai $AiContext -f Dockerfile.dev
-                    $envFlags = @("-e","DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/fluent","-e","ENVIRONMENT=development","-e","DEBUG=true","-e","UV_CACHE_DIR=/app/.cache/uv")
+                    $envFlags = @("-e","BOOTSTRAP_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/fluent","-e","MIGRATIONS_DATABASE_URL=postgresql+asyncpg://ai_migrator:password@localhost:5432/fluent","-e","DATABASE_URL=postgresql+asyncpg://ai_user:password@localhost:5432/fluent","-e","ENVIRONMENT=development","-e","DEBUG=true","-e","UV_CACHE_DIR=/app/.cache/uv")
                     if (Test-Path "$AiContext/.env") { $envFlags += @("--env-file","$AiContext/.env") }
                     & $ContainerCmd run -d --name fluent-ai --pod $PodName @envFlags `
                         -v "$AiContext/src:/app/src:ro" -v "$AiContext/tests:/app/tests:ro" `
@@ -372,18 +371,6 @@ function Invoke-RepoCmd {
                     $name = if ($Remaining.Count -gt 0) { $Remaining[0] } else { throw "Usage: fluent.ps1 api db:generate <name>" }
                     Invoke-Exec "api" @("npx", "drizzle-kit", "generate", "--name", $name)
                 }
-                "db:dump-schema" {
-                    $output = if ($Remaining.Count -gt 0) { $Remaining[0] } else { "$ScriptDir/db/schema-dump.sql" }
-                    Write-Running "Dumping API schema to $output..."
-                    $header = "-- Schema-only dump of fluent-api public tables.`r`n-- Auto-generated.`r`n"
-                    $header | Out-File -FilePath $output -Encoding utf8
-                    if ($RuntimeMode -eq "podman-pod") {
-                        & $ContainerCmd exec fluent-db pg_dump -U postgres --schema-only --schema=public fluent | Add-Content -Path $output
-                    } else {
-                        Invoke-Compose @("exec", "-T", "db", "pg_dump", "-U", "postgres", "--schema-only", "--schema=public", "fluent") | Add-Content -Path $output
-                    }
-                    Write-Success "Schema dumped to $output"
-                }
                 default  { Write-Error-Color "Unknown api command: $Cmd"; exit 1 }
             }
         }
@@ -450,12 +437,15 @@ function Db-Migrate {
         }
         "ai" {
             Write-Running "Running fluent-ai migrations..."
-            Write-Host "  (no migrations configured yet)"
+            Invoke-Exec "ai" @("uv", "run", "alembic", "upgrade", "head")
+            Write-Success "AI migrations completed"
         }
         "all" {
             $confirm = Read-Host "Run migrations for all services? [y/N]"
-            if ($confirm -match "^[Yy]$") { Db-Migrate "api" }
-            else { Write-Host "Aborted." }
+            if ($confirm -match "^[Yy]$") {
+                Db-Migrate "api"
+                Db-Migrate "ai"
+            } else { Write-Host "Aborted." }
         }
         default { Write-Error-Color "Unknown migrate target: $Target"; exit 1 }
     }
@@ -472,12 +462,15 @@ function Db-Seed {
         }
         "ai" {
             Write-Running "Running fluent-ai seeds..."
-            Write-Host "  (no seeds configured yet)"
+            Invoke-Exec "ai" @("env", "PYTHONPATH=/app/src", "uv", "run", "python", "-m", "app.db.seeds")
+            Write-Success "AI seeds completed"
         }
         "all" {
             $confirm = Read-Host "Run seeds for all services? [y/N]"
-            if ($confirm -match "^[Yy]$") { Db-Seed "api" }
-            else { Write-Host "Aborted." }
+            if ($confirm -match "^[Yy]$") {
+                Db-Seed "api"
+                Db-Seed "ai"
+            } else { Write-Host "Aborted." }
         }
         default { Write-Error-Color "Unknown seed target: $Target"; exit 1 }
     }
@@ -485,10 +478,10 @@ function Db-Seed {
 
 function Db-Init {
     Write-Running "Full database initialization (migrations + seeds)..."
-    $confirm = Read-Host "Continue? [y/N]"
+    $confirm = Read-Host "This will run all migrations and seeds. Continue? [y/N]"
     if ($confirm -match "^[Yy]$") {
-        Db-Migrate "api"
-        Db-Seed "api"
+        Invoke-Exec "api" @("npm", "run", "db:setup")
+        Invoke-Exec "ai" @("env", "PYTHONPATH=/app/src", "uv", "run", "python", "src/app/db/scripts/setup.py")
         Write-Success "Database initialization complete."
     } else {
         Write-Host "Aborted."
@@ -624,7 +617,6 @@ Repo-specific commands (prefix style):
   api db:migrate          Run API migrations
   api db:seed             Run API seeds
   api db:generate <name>  Generate a new migration
-  api db:dump-schema      Dump API schema for fluent-ai sync
 
   ai up                   Start AI service
   ai down                 Stop AI service
