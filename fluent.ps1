@@ -499,6 +499,84 @@ function Db-Studio {
     npx drizzle-kit studio
 }
 
+# ── Repo git sync ─────────────────────────────────────────────────────────────
+
+function Sync-One {
+    param([string]$Name, [string]$Path)
+    if (-not (Test-Path "$Path/.git")) {
+        Write-Error-Color "  [skip] $Name -> $Path (not a git repo)"
+        return
+    }
+    Write-Running "Syncing $Name..."
+    $dirty = git -C $Path status --porcelain
+    if ($dirty) {
+        Write-Error-Color "  [skip] $Name has uncommitted changes; leaving as-is"
+        return
+    }
+    git -C $Path fetch --prune origin
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error-Color "  [warn] $Name fetch failed; skipping"
+        return
+    }
+    git -C $Path checkout main
+    git -C $Path pull --ff-only
+    if ($LASTEXITCODE -eq 0) {
+        Write-Success "  [ok] $Name on main, up to date"
+    } else {
+        Write-Error-Color "  [warn] $Name could not fast-forward; resolve manually"
+    }
+}
+
+function Sync-Repos {
+    Write-Host "=== Switching all repos to main and pulling latest ==="
+    Write-Host ""
+    Sync-One "fluent-platform" $ScriptDir
+    foreach ($repo in $Repos) {
+        Sync-One $repo.Name $repo.Path
+    }
+    Write-Host ""
+    Write-Success "Sync complete."
+}
+
+function Status-One {
+    param([string]$Name, [string]$Path)
+    if (-not (Test-Path "$Path/.git")) {
+        Write-Host "  [skip] $Name -> $Path (not a git repo)"
+        return
+    }
+    $branch = git -C $Path rev-parse --abbrev-ref HEAD 2>$null
+    $dirty = if (git -C $Path status --porcelain) { " (dirty)" } else { "" }
+    git -C $Path fetch --quiet origin 2>$null
+    git -C $Path rev-parse --abbrev-ref "@{upstream}" 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        $counts = git -C $Path rev-list --left-right --count "@{upstream}...HEAD" 2>$null
+        $parts = $counts -split "\s+"
+        $state = "ahead $($parts[1]), behind $($parts[0])"
+    } else {
+        $state = "no upstream"
+    }
+    Write-Host ("  {0,-18} {1}{2} [{3}]" -f $Name, $branch, $dirty, $state)
+}
+
+function Status-Repos {
+    Write-Host "=== Repo status (branch / ahead / behind vs upstream) ==="
+    Write-Host ""
+    Status-One "fluent-platform" $ScriptDir
+    foreach ($repo in $Repos) {
+        Status-One $repo.Name $repo.Path
+    }
+}
+
+function Invoke-Repos {
+    param([string]$Sub = "check")
+    switch ($Sub) {
+        "check"  { Test-Repos | Out-Null }
+        "sync"   { Sync-Repos }
+        "status" { Status-Repos }
+        default  { Write-Error-Color "Unknown repos command: $Sub (use check, sync, or status)"; exit 1 }
+    }
+}
+
 # ── Setup ─────────────────────────────────────────────────────────────────────
 
 function Setup {
@@ -551,9 +629,12 @@ if ($RuntimeMode -eq "podman-pod") { Write-Host "Using native Podman pods" }
 else { Write-Host "Using Docker Compose" }
 Write-Host ""
 
-$repos = @("api", "ai", "web", "worker")
+$repoTargets = @("api", "ai", "web", "worker")
 
-if ($repos -contains $Command) {
+if ($Command -eq "repos") {
+    $sub = if ($Args.Count -gt 0) { $Args[0] } else { "check" }
+    Invoke-Repos -Sub $sub
+} elseif ($repoTargets -contains $Command) {
     $repoCmd = if ($Args.Count -gt 0) { $Args[0] } else { "up" }
     $remaining = if ($Args.Count -gt 1) { $Args[1..($Args.Count - 1)] } else { @() }
     Invoke-RepoCmd -Repo $Command -Cmd $repoCmd -Remaining $remaining
@@ -574,7 +655,7 @@ if ($repos -contains $Command) {
         "fresh"     { Ecosystem-Fresh }
         "build"     { Ecosystem-Build -Services $Args }
         "setup"     { Setup }
-        "check-repos" { Test-Repos | Out-Null }
+        "check-repos" { Test-Repos | Out-Null }  # deprecated alias for 'repos check'
         default {
             Write-Host @"
 Usage: .\fluent.ps1 <command> [args]
@@ -599,7 +680,12 @@ Lifecycle:
   fresh                   Destroy everything and rebuild
   build [service...]      Rebuild images
   setup                   Clone repos, copy .env files
-  check-repos             Verify sibling repos exist
+
+Repos (all sibling repos + platform):
+  repos check             Verify sibling repos exist
+  repos sync              Switch all repos to main and pull latest
+  repos status            Show each repo's branch + ahead/behind
+  check-repos             Deprecated alias for 'repos check'
 
 Repo-specific commands (prefix style):
   api up                  Start API service

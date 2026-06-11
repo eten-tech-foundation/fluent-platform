@@ -90,7 +90,24 @@ These operate on the full stack or a subset of services:
 | `fresh`                 | Destroy everything - containers, volumes, images |
 | `build [service...]`  | Rebuild images without cache                   |
 | `setup`                 | Clone repos, copy .env files                   |
-| `check-repos`           | Verify sibling repos exist                     |
+| `check-repos`           | Deprecated alias for `repos check`             |
+
+### Repos Commands
+
+These operate across all sibling repos **and** the platform repo itself:
+
+| Command          | Description                                              |
+|------------------|---------------------------------------------------------|
+| `repos check`    | Verify sibling repos exist                               |
+| `repos sync`     | Switch every repo to `main` and pull latest (fast-forward only; skips repos with uncommitted changes) |
+| `repos status`   | Show each repo's branch, dirty state, and ahead/behind vs upstream |
+
+```sh
+./fluent.sh repos status   # see where each repo stands
+./fluent.sh repos sync     # get everything onto the latest main
+```
+
+`repos sync` and `repos status` fetch from `origin`, so they require network access and your Git remote auth (e.g. SSH) to be configured.
 
 ### Database Commands
 
