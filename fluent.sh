@@ -583,6 +583,10 @@ sync_one() {
     return
   fi
   git -C "$path" fetch --prune origin
+  if [ $? -ne 0 ]; then
+    echo_error "  [warn] $name fetch failed; skipping"
+    return
+  fi
   git -C "$path" checkout main
   if git -C "$path" pull --ff-only; then
     echo_success "  [ok] $name on main, up to date"
