@@ -514,6 +514,10 @@ function Sync-One {
         return
     }
     git -C $Path fetch --prune origin
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error-Color "  [warn] $Name fetch failed; skipping"
+        return
+    }
     git -C $Path checkout main
     git -C $Path pull --ff-only
     if ($LASTEXITCODE -eq 0) {
