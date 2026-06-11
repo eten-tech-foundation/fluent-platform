@@ -568,6 +568,86 @@ db_studio() {
   npx drizzle-kit studio
 }
 
+# ── Repo git sync ─────────────────────────────────────────────────────────────
+
+sync_one() {
+  local name="$1"
+  local path="$2"
+  if [ ! -d "$path/.git" ]; then
+    echo_error "  [skip] $name -> $path (not a git repo)"
+    return
+  fi
+  echo_running "Syncing $name..."
+  if [ -n "$(git -C "$path" status --porcelain)" ]; then
+    echo_error "  [skip] $name has uncommitted changes; leaving as-is"
+    return
+  fi
+  git -C "$path" fetch --prune origin
+  git -C "$path" checkout main
+  if git -C "$path" pull --ff-only; then
+    echo_success "  [ok] $name on main, up to date"
+  else
+    echo_error "  [warn] $name could not fast-forward; resolve manually"
+  fi
+}
+
+sync_repos() {
+  echo "=== Switching all repos to main and pulling latest ==="
+  echo ""
+  sync_one "fluent-platform" "$SCRIPT_DIR"
+  for i in "${!REPOS[@]}"; do
+    sync_one "${REPO_NAMES[$i]}" "${REPOS[$i]}"
+  done
+  echo ""
+  echo_success "Sync complete."
+}
+
+status_one() {
+  local name="$1"
+  local path="$2"
+  if [ ! -d "$path/.git" ]; then
+    echo "  [skip] $name -> $path (not a git repo)"
+    return
+  fi
+  local branch dirty ahead behind state
+  branch=$(git -C "$path" rev-parse --abbrev-ref HEAD 2>/dev/null)
+  if [ -n "$(git -C "$path" status --porcelain)" ]; then
+    dirty=" (dirty)"
+  else
+    dirty=""
+  fi
+  git -C "$path" fetch --quiet origin 2>/dev/null || true
+  if git -C "$path" rev-parse --abbrev-ref "@{upstream}" &>/dev/null; then
+    read -r ahead behind < <(git -C "$path" rev-list --left-right --count "@{upstream}...HEAD" 2>/dev/null | awk '{print $2" "$1}')
+    state="ahead $ahead, behind $behind"
+  else
+    state="no upstream"
+  fi
+  printf "  %-18s %s%s [%s]\n" "$name" "$branch" "$dirty" "$state"
+}
+
+status_repos() {
+  echo "=== Repo status (branch / ahead / behind vs upstream) ==="
+  echo ""
+  status_one "fluent-platform" "$SCRIPT_DIR"
+  for i in "${!REPOS[@]}"; do
+    status_one "${REPO_NAMES[$i]}" "${REPOS[$i]}"
+  done
+}
+
+handle_repos() {
+  local sub="${1:-check}"
+  case "$sub" in
+    check)  check_repos ;;
+    sync)   sync_repos ;;
+    status) status_repos ;;
+    *)
+      echo_error "Unknown repos command: $sub (use check, sync, or status)"
+      exit 1
+      ;;
+  esac
+}
+
 # ── Ecosystem lifecycle commands ──────────────────────────────────────────────
 
 setup() {
@@ -735,7 +815,7 @@ handle_ecosystem() {
     fresh)       ecosystem_fresh ;;
     build)       ecosystem_build "$@" ;;
     setup)       setup ;;
-    check-repos) check_repos ;;
+    check-repos) check_repos ;;  # deprecated alias for 'repos check'
     help)
       cat <<'USAGE'
 Usage: ./fluent.sh <command> [args]
@@ -760,7 +840,12 @@ Lifecycle:
   fresh                   Destroy everything and rebuild
   build [service...]      Rebuild images
   setup                   Clone repos, copy .env files
-  check-repos             Verify sibling repos exist
+
+Repos (all sibling repos + platform):
+  repos check             Verify sibling repos exist
+  repos sync              Switch all repos to main and pull latest
+  repos status            Show each repo's branch + ahead/behind
+  check-repos             Deprecated alias for 'repos check'
 
 Repo-specific commands (prefix style):
   api up                  Start API service
@@ -822,8 +907,11 @@ USAGE
   esac
 }
 
+# Repos group: fluent.sh repos <check|sync|status>
+if [ "$cmd" = "repos" ]; then
+  handle_repos "$@"
 # Prefix-style: fluent.sh <repo> <cmd>
-if [ "$cmd" = "api" ] || [ "$cmd" = "ai" ] || [ "$cmd" = "web" ] || [ "$cmd" = "worker" ]; then
+elif [ "$cmd" = "api" ] || [ "$cmd" = "ai" ] || [ "$cmd" = "web" ] || [ "$cmd" = "worker" ]; then
   repo="$cmd"
   repo_cmd="${1:-up}"
   shift || true
