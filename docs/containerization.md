@@ -70,11 +70,21 @@ Under **Podman**, the platform creates the `fluent` pod and starts containers di
 
 ### Container Naming
 
-Under Podman, the platform uses hyphenated container names for clarity:
-- `fluent-db`
-- `fluent-api`
-- `fluent-worker`
-- `fluent-ai`
-- `fluent-web`
+Every compose service pins an explicit `container_name`, so containers have stable,
+predictable names independent of the Docker Compose project (working directory) or runtime.
+Names are scoped by mode so the two stacks never clobber each other:
 
-These match the service names in the platform `compose.yaml` and are consistent across both runtime modes.
+| Service | Ecosystem (platform) | Standalone (repo) |
+|---------|----------------------|-------------------|
+| db      | `fluent-db`          | `fluent-api-db` / `fluent-ai-db` |
+| api     | `fluent-api`         | `fluent-api-api`  |
+| worker  | `fluent-worker`      | `fluent-api-worker` |
+| ai      | `fluent-ai`          | `fluent-ai-ai`    |
+| web     | `fluent-web`         | `fluent-web` (raw run, no compose) |
+
+Under **Docker Compose**, the platform runs `docker compose` lifecycle commands directly (`up`, `down`, `logs`, etc.). Repo-specific commands are executed by stable container name via `docker exec` (for example, `docker exec fluent-api npm run test`).
+
+Because `container_name` is global to the daemon and the modes share host ports
+(5432 / 9999), run **one stack at a time** — the ecosystem stack or a single standalone
+repo, not both. (`container_name` also disables Compose scaling, which is fine for
+single-instance dev containers.)
