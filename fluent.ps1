@@ -206,7 +206,7 @@ function Ecosystem-Up {
         Write-Success "All services started!"
     } else {
         if ($Services.Count -eq 0) { Invoke-Compose @("up", "-d", "--build") }
-        else { Invoke-Compose @("up", "-d", "--build", "--no-deps") + $Services }
+        else { Invoke-Compose (@("up", "-d", "--build", "--no-deps") + $Services) }
     }
 }
 
@@ -225,7 +225,7 @@ function Ecosystem-Down {
         }
     } else {
         if ($Services.Count -eq 0) { Invoke-Compose @("down") }
-        else { Invoke-Compose @("rm", "-sf") + $Services }
+        else { Invoke-Compose (@("rm", "-sf") + $Services) }
     }
 }
 
@@ -245,7 +245,7 @@ function Ecosystem-Restart {
         }
     } else {
         if ($Services.Count -eq 0) { Invoke-Compose @("restart") }
-        else { Invoke-Compose @("restart") + $Services }
+        else { Invoke-Compose (@("restart") + $Services) }
     }
 }
 
@@ -255,7 +255,7 @@ function Ecosystem-Logs {
         if ($Services.Count -eq 0) { & $ContainerCmd pod logs -f $PodName }
         else { & $ContainerCmd logs -f "fluent-$($Services[0])" }
     } else {
-        Invoke-Compose @("logs", "-f") + $Services
+        Invoke-Compose (@("logs", "-f") + $Services)
     }
 }
 
@@ -337,7 +337,7 @@ function Ecosystem-Build {
         }
     } else {
         if ($Services.Count -eq 0) { Invoke-Compose @("build", "--no-cache") }
-        else { Invoke-Compose @("build", "--no-cache") + $Services }
+        else { Invoke-Compose (@("build", "--no-cache") + $Services) }
     }
     Write-Success "Build complete"
 }
@@ -355,13 +355,13 @@ function Invoke-RepoCmd {
                 "restart"{ Ecosystem-Restart -Services @("api") }
                 "logs"   { Ecosystem-Logs -Services @("api") }
                 "shell"  { Ecosystem-Shell "api" }
-                "test"   { Invoke-Exec "api" @("npm", "run", "test") + $Remaining }
+                "test"   { Invoke-Exec "api" (@("npm", "run", "test") + $Remaining) }
                 "lint"   { Invoke-Exec "api" @("npm", "run", "lint") }
                 "lint:fix" { Invoke-Exec "api" @("npm", "run", "lint:fix") }
                 "format" { Invoke-Exec "api" @("npm", "run", "format") }
                 "format:check" { Invoke-Exec "api" @("npm", "run", "format:check") }
                 "typecheck" { Invoke-Exec "api" @("npm", "run", "typecheck") }
-                "run"    { Invoke-Exec "api" @("npm", "run") + $Remaining }
+                "run"    { Invoke-Exec "api" (@("npm", "run") + $Remaining) }
                 "db:migrate" { Invoke-Exec "api" @("npx", "drizzle-kit", "migrate") }
                 "db:seed" {
                     Invoke-Exec "api" @("npx", "tsx", "src/db/seeds/roles.ts")
@@ -381,13 +381,13 @@ function Invoke-RepoCmd {
                 "restart"{ Ecosystem-Restart -Services @("ai") }
                 "logs"   { Ecosystem-Logs -Services @("ai") }
                 "shell"  { Ecosystem-Shell "ai" }
-                "test"   { Invoke-Exec "ai" @("uv", "run", "pytest", "tests/", "-v") + $Remaining }
+                "test"   { Invoke-Exec "ai" (@("uv", "run", "pytest", "tests/", "-v") + $Remaining) }
                 "lint"   { Invoke-Exec "ai" @("uv", "run", "ruff", "check") }
                 "lint:fix" { Invoke-Exec "ai" @("uv", "run", "ruff", "check", "--fix") }
                 "format" { Invoke-Exec "ai" @("uv", "run", "ruff", "format") }
                 "format:check" { Invoke-Exec "ai" @("uv", "run", "ruff", "format", "--check") }
                 "typecheck" { Invoke-Exec "ai" @("uv", "run", "mypy", "src") }
-                "run"    { Invoke-Exec "ai" @("uv", "run") + $Remaining }
+                "run"    { Invoke-Exec "ai" (@("uv", "run") + $Remaining) }
                 "db:migrate" { Write-Host "(no migrations configured yet)" }
                 "db:seed"    { Write-Host "(no seeds configured yet)" }
                 default  { Write-Error-Color "Unknown ai command: $Cmd"; exit 1 }
@@ -400,7 +400,7 @@ function Invoke-RepoCmd {
                 "restart"{ Ecosystem-Restart -Services @("web") }
                 "logs"   { Ecosystem-Logs -Services @("web") }
                 "shell"  { Ecosystem-Shell "web" }
-                "test"   { Invoke-Exec "web" @("pnpm", "test") + $Remaining }
+                "test"   { Invoke-Exec "web" (@("pnpm", "test") + $Remaining) }
                 "lint"   { Invoke-Exec "web" @("pnpm", "lint") }
                 "lint:fix" { Invoke-Exec "web" @("pnpm", "lint:fix") }
                 "format" { Invoke-Exec "web" @("pnpm", "format") }
@@ -408,7 +408,7 @@ function Invoke-RepoCmd {
                 "typecheck" { Invoke-Exec "web" @("pnpm", "typecheck") }
                 "precheck" { Invoke-Exec "web" @("pnpm", "precheck") }
                 "preview"  { Invoke-Exec "web" @("pnpm", "preview") }
-                "run"    { Invoke-Exec "web" @("pnpm") + $Remaining }
+                "run"    { Invoke-Exec "web" (@("pnpm") + $Remaining) }
                 default  { Write-Error-Color "Unknown web command: $Cmd"; exit 1 }
             }
         }
