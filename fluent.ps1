@@ -88,7 +88,7 @@ function Invoke-Exec {
         $cname = "fluent-$Service"
         & $ContainerCmd exec $cname @CmdArgs
     } else {
-        Invoke-Compose @("exec", $Service) + $CmdArgs
+        & docker exec "fluent-$Service" @CmdArgs
     }
 }
 
@@ -277,7 +277,7 @@ function Ecosystem-Shell {
     param([string]$Service = "api")
     if ($Service -eq "db") {
         if ($RuntimeMode -eq "podman-pod") { & $ContainerCmd exec -it fluent-db psql -U postgres -d fluent }
-        else { Invoke-Compose @("exec", "db", "psql", "-U", "postgres", "-d", "fluent") }
+        else { & docker exec -it fluent-db psql -U postgres -d fluent }
     } else {
         Invoke-Exec $Service @("sh")
     }
@@ -490,7 +490,7 @@ function Db-Init {
 
 function Db-Psql {
     if ($RuntimeMode -eq "podman-pod") { & $ContainerCmd exec -it fluent-db psql -U postgres -d fluent }
-    else { Invoke-Compose @("exec", "db", "psql", "-U", "postgres", "-d", "fluent") }
+    else { & docker exec -it fluent-db psql -U postgres -d fluent }
 }
 
 function Db-Studio {
