@@ -82,10 +82,7 @@ Names are scoped by mode so the two stacks never clobber each other:
 | ai      | `fluent-ai`          | `fluent-ai-ai`    |
 | web     | `fluent-web`         | `fluent-web` (raw run, no compose) |
 
-The repo helper scripts (`fapi.sh`, `fai.sh`, `fweb.sh`) `exec` these names directly
-(`docker exec <name>` / `podman exec <name>`) rather than via `docker compose exec`. This is
-why a passthrough such as `./fluent.sh api run db:migrate-rbac` finds the running container
-no matter which tool or directory started the stack.
+Under **Docker Compose**, the platform runs `docker compose` lifecycle commands directly (`up`, `down`, `logs`, etc.). Repo-specific commands are executed by stable container name via `docker exec` (for example, `docker exec fluent-api npm run test`).
 
 Because `container_name` is global to the daemon and the modes share host ports
 (5432 / 9999), run **one stack at a time** — the ecosystem stack or a single standalone
