@@ -179,6 +179,31 @@ Run development, test, and database commands inside a specific service container
 ./fluent.sh worker shell      # Open shell in Worker container
 ```
 
+## Shell Completion
+
+Tab-completion for `fluent` commands and subcommands is available in `completions/`.
+
+**Bash** - add to `~/.bashrc`:
+
+```sh
+source /path/to/fluent-platform/completions/fluent.bash
+```
+
+**Zsh** - add to `~/.zshrc` (`bashcompinit` bridges the bash-style completion):
+
+```sh
+autoload -Uz bashcompinit && bashcompinit
+source /path/to/fluent-platform/completions/fluent.bash
+```
+
+**PowerShell** - load for the current session, or add to your `$PROFILE` to make it permanent:
+
+```powershell
+Import-Module /path/to/fluent-platform/completions/fluent.ps1.psm1
+```
+
+After loading, type `./fluent.sh <Tab>` (or `.\fluent.ps1 <Tab>`) to complete commands, and `./fluent.sh repos <Tab>` to complete subcommands. The completion word lists live alongside the scripts and must be kept in sync when commands change.
+
 ## Environment Configuration
 
 Copy the example and fill in your values:
