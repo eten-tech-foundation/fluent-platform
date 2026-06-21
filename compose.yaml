@@ -99,10 +99,23 @@ services:
       - ${AI_CONTEXT:-../fluent-ai}/uv.lock:/app/uv.lock:ro
       - ${AI_CONTEXT:-../fluent-ai}/docker-entrypoint.sh:/app/docker-entrypoint.sh:ro
       - ${AI_CONTEXT:-../fluent-ai}/tests:/app/tests:ro
+      # docker-entrypoint.sh runs scripts/bootstrap.py (and scripts/ also holds
+      # the manual smoke test). Mount scripts/ — matching the api service above
+      # (line 27) — so the bootstrap -> alembic -> seeds chain can run; that
+      # chain creates the ai schema's api_keys table and seeds the dev key.
+      # Without it the entrypoint had to be skipped (SKIP_DB_BOOTSTRAP=1) and the
+      # ai schema stayed empty, so API-key auth 500'd
+      # ("relation ai.api_keys does not exist").
+      - ${AI_CONTEXT:-../fluent-ai}/scripts:/app/scripts:ro
       - fluent-ai-logs:/app/logs
     env_file: ${AI_CONTEXT:-../fluent-ai}/.env
     environment:
       DATABASE_URL: "postgresql+asyncpg://postgres:postgres@db:5432/fluent"
+      # bootstrap.py (run by docker-entrypoint.sh) connects as the superuser to
+      # create the ai schema, roles and grants. fluent-ai/.env does not set this
+      # (it is a platform/ecosystem concern), so provide it here. Plain
+      # postgres:// form: bootstrap.py uses asyncpg directly, not SQLAlchemy.
+      BOOTSTRAP_DATABASE_URL: "postgres://postgres:postgres@db:5432/fluent"
       # Override MIGRATIONS_DATABASE_URL so it matches the password the platform
       # DB's db/init/init-db.sql actually assigns to the `migrations` role
       # (`postgres`). fluent-ai/.env defaults this to `migrations:password`,
