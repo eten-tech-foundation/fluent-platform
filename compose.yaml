@@ -61,7 +61,16 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 15s
+      # The api entrypoint runs bootstrap + migrations + ~10 sequential seeds
+      # (the last, pericope-sets, inserts ~33.8k rows) BEFORE the HTTP server
+      # starts listening. On a cold DB this can take well over a minute — longer
+      # than the old 15s grace + 5×10s retries (~65s), so compose declared the
+      # container "unhealthy" and aborted its dependents (web/worker), failing
+      # `up` with a spurious race. During start_period, failing probes do NOT
+      # count toward `retries` and do NOT mark the container unhealthy, so a
+      # generous window absorbs slow first-boot seeding without weakening
+      # steady-state health detection.
+      start_period: 180s
 
   worker:
     container_name: fluent-worker
