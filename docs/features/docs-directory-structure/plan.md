@@ -118,9 +118,7 @@ git commit -m "docs: migrate to feature-grouped docs structure"
 
 **Files:**
 - Move: `docs/design/record-tab/` (whole directory, including `README.md` and all `.png` files) → `docs/features/record-tab/design/`
-- Move: `docs/AGENT_ONBOARDING.md` → `docs/guides/AGENT_ONBOARDING.md`
-- Move: `docs/ci.md` → `docs/guides/ci.md`
-- Move: `docs/issue-tracking.md` → `docs/guides/issue-tracking.md`
+- Leave in place: `docs/AGENT_ONBOARDING.md`, `docs/ci.md`, `docs/issue-tracking.md` (repo-wide reference docs, heavily linked from `AGENTS.md`/`CLAUDE.md`/cursor rules — kept at `docs/` root rather than moved into `guides/`, per review feedback)
 - Leave in place: everything already under `docs/guides/`
 - Create: `docs/README.md`
 
@@ -133,10 +131,6 @@ cd <path-to-fluent-mobile-checkout>  # repository root
 mkdir -p docs/features/record-tab
 git mv docs/design/record-tab docs/features/record-tab/design
 find docs/design -type d -empty -delete
-
-git mv docs/AGENT_ONBOARDING.md docs/guides/AGENT_ONBOARDING.md
-git mv docs/ci.md docs/guides/ci.md
-git mv docs/issue-tracking.md docs/guides/issue-tracking.md
 ```
 
 - [ ] **Step 2: Verify `docs/design/` no longer exists**
@@ -147,7 +141,7 @@ Expected: `OK`
 - [ ] **Step 3: Audit the whole repository for references to moved paths**
 
 ```bash
-git grep -n -E 'docs/design/record-tab|docs/AGENT_ONBOARDING\.md|docs/ci\.md|docs/issue-tracking\.md'
+git grep -n -E 'docs/design/record-tab'
 ```
 This is a repo-wide, tracked-files-only search covering Markdown inline
 links, Markdown reference-style link definitions, HTML `href=`/`src=`
@@ -155,9 +149,8 @@ links, and absolute `/docs/...` references — not just `docs/` and not just
 Markdown. `docs/features/record-tab/design/README.md`'s own image
 references (`./01-idle-ready.png`, etc.) are unaffected since the whole
 directory moved together and won't match this pattern. Check `AGENTS.md`,
-`CLAUDE.md`, and any other hit that links to `docs/AGENT_ONBOARDING.md`,
-`docs/ci.md`, `docs/issue-tracking.md`, or `docs/design/...` by path, and
-update it.
+`CLAUDE.md`, and any other hit that links to `docs/design/...` by path,
+and update it.
 
 - [ ] **Step 4: Write `docs/README.md`**
 
@@ -171,10 +164,12 @@ in fluent-platform for the full rationale.
 - `features/<slug>/` — everything about one feature or initiative:
   `proposal.md`, `design.md`, `plan.md`, `tickets/`, `design/` (mockups).
   Only the stages that exist are present.
-- `guides/` — process/how-to docs not tied to one feature (includes
-  onboarding, CI, and issue-tracking docs).
+- `guides/` — process/how-to docs not tied to one feature.
 - `tasks/` — standalone dated work items with no parent feature.
-- Loose files at the root of `docs/` — repo-wide reference docs.
+- Loose files at the root of `docs/` — repo-wide reference docs
+  (includes `AGENT_ONBOARDING.md`, `ci.md`, `issue-tracking.md`, which
+  stay here rather than moving into `guides/` since they're heavily
+  linked from agent entrypoints and read as repo-wide reference material).
 ```
 
 - [ ] **Step 5: Review the diff and commit**
