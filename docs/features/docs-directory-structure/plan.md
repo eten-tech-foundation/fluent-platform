@@ -15,7 +15,7 @@
 - Every move uses `git mv` (or `git mv` + manual edit for renames), never delete+recreate — history must follow the file.
 - No `superpowers/` directory survives migration in any repo.
 - Feature folder file naming follows the spec's three cases: (1) one document per stage → fixed name (`proposal.md`/`design.md`/`plan.md`); (2) multiple documents for the same stage → dated files, either flat in the feature folder prefixed with the stage name or under a `plans/`/`tickets/` subfolder; (3) a document that doesn't map onto proposal/design/plan at all → keep its original descriptive filename. See the spec's Rules section for full detail.
-- After each repo's moves, grep the whole `docs/` tree for markdown relative links (`](./` and `](../` and bare `](docs/`) that reference moved paths, and fix them.
+- Before every migration commit (all of Tasks 1–5, no exceptions), audit the **whole repository**, not just `docs/`, for references to every path moved in that task, and fix any hit. Use `git grep -n -E` with the literal old-path substrings from that task's Files list — a substring match catches Markdown inline links (`](path)`), Markdown reference-style link definitions (`[label]: path`), HTML `href=`/`src=` links, and absolute `/docs/...` references all in one pass, regardless of wrapper syntax, anywhere in the repo (README, AGENTS.md/CLAUDE.md, source comments, etc.), since `git grep` only searches tracked files and already respects `.gitignore`.
 - Each task ends in one commit on the target repo's current branch (do not create new branches — each repo is already on its own working branch). A repo's migration may span multiple tasks — fluent-api is split across Task 4 (mechanical moves) and Task 5 (RBAC cluster reconciliation) — each producing its own commit.
 - fluent-platform is explicitly out of scope for this plan (deferred per spec).
 
@@ -73,12 +73,17 @@ find docs/superpowers -type d -empty -delete
 Run: `test ! -d docs/superpowers && echo OK`
 Expected: `OK`
 
-- [ ] **Step 3: Grep for and fix broken relative links**
+- [ ] **Step 3: Audit the whole repository for references to moved paths**
 
 ```bash
-grep -rn '](\./\|](\.\./\|](docs/' docs/ | grep -v '\.png)'
+git grep -n -E 'docs/superpowers/|docs/http-decoupling-transition\.md|docs/guides/api-key-runbook\.md'
 ```
-For each hit whose target path was moved above, update the link to the new path.
+This is a repo-wide, tracked-files-only search (`git grep` respects
+`.gitignore`), so it catches Markdown inline links, Markdown
+reference-style link definitions, HTML `href=`/`src=` links, and absolute
+`/docs/...` references anywhere in the repo — not just `docs/` and not
+just Markdown files. For each hit whose target path was moved above,
+update the link to the new path.
 
 - [ ] **Step 4: Write `docs/README.md`**
 
@@ -139,16 +144,20 @@ git mv docs/issue-tracking.md docs/guides/issue-tracking.md
 Run: `test ! -d docs/design && echo OK`
 Expected: `OK`
 
-- [ ] **Step 3: Grep for and fix broken relative links**
+- [ ] **Step 3: Audit the whole repository for references to moved paths**
 
 ```bash
-grep -rln '](\./\|](\.\./\|](docs/' docs/ CLAUDE.md 2>/dev/null
+git grep -n -E 'docs/design/record-tab|docs/AGENT_ONBOARDING\.md|docs/ci\.md|docs/issue-tracking\.md'
 ```
-`docs/features/record-tab/design/README.md` is the most likely file to reference
-the images by relative path — those paths (`./01-idle-ready.png`, etc.) are
-unaffected since the whole directory moved together. Check `CLAUDE.md` and any
-other repo doc that links to `docs/AGENT_ONBOARDING.md`, `docs/ci.md`,
-`docs/issue-tracking.md`, or `docs/design/...` by path, and update them.
+This is a repo-wide, tracked-files-only search covering Markdown inline
+links, Markdown reference-style link definitions, HTML `href=`/`src=`
+links, and absolute `/docs/...` references — not just `docs/` and not just
+Markdown. `docs/features/record-tab/design/README.md`'s own image
+references (`./01-idle-ready.png`, etc.) are unaffected since the whole
+directory moved together and won't match this pattern. Check `AGENTS.md`,
+`CLAUDE.md`, and any other hit that links to `docs/AGENT_ONBOARDING.md`,
+`docs/ci.md`, `docs/issue-tracking.md`, or `docs/design/...` by path, and
+update it.
 
 - [ ] **Step 4: Write `docs/README.md`**
 
@@ -213,12 +222,16 @@ find docs/superpowers -type d -empty -delete
 Run: `test ! -d docs/proposals -a ! -d docs/superpowers && echo OK`
 Expected: `OK`
 
-- [ ] **Step 3: Grep for and fix broken relative links**
+- [ ] **Step 3: Audit the whole repository for references to moved paths**
 
 ```bash
-grep -rn '](\./\|](\.\./\|](docs/proposals\|](docs/superpowers' docs/ | grep -v '\.png)'
+git grep -n -E 'docs/proposals/|docs/superpowers/'
 ```
-Fix any hit pointing at an old `proposals/` or `superpowers/` path.
+This is a repo-wide, tracked-files-only search covering Markdown inline
+links, Markdown reference-style link definitions, HTML `href=`/`src=`
+links, and absolute `/docs/...` references — not just `docs/` and not just
+Markdown. Fix any hit pointing at an old `proposals/` or `superpowers/`
+path.
 
 - [ ] **Step 4: Write `docs/README.md`**
 
@@ -330,7 +343,19 @@ find docs/proposals -type d -empty -delete
 Run: `git status --short | grep -E '^R '`
 Expected: one rename line per file moved above.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: Audit the whole repository for references to moved paths**
+
+```bash
+git grep -n -E 'docs/proposals/|docs/superpowers/|docs/ai-suggestions-internal-consolidation\.md|docs/authentication-migration\.md|docs/http-decoupling-transition\.md|docs/source-audio\.md|docs/temp-pm-project-create-bypass\.md'
+```
+This is a repo-wide, tracked-files-only search covering Markdown inline
+links, Markdown reference-style link definitions, HTML `href=`/`src=`
+links, and absolute `/docs/...` references — not just `docs/` and not just
+Markdown. `docs/permissions.md`, `docs/ai-suggestions-workflow.md`, and
+`AGENTS.md` are the most likely files to cross-reference the moved docs.
+Fix any hit whose target path was moved above.
+
+- [ ] **Step 5: Commit**
 
 ```bash
 git add -A docs
@@ -410,13 +435,17 @@ test ! -d docs/proposals -a ! -d docs/superpowers && echo OK
 ```
 Expected: `OK`
 
-- [ ] **Step 5: Grep for and fix broken relative links**
+- [ ] **Step 5: Audit the whole repository for references to moved paths**
 
 ```bash
-grep -rln '](\./\|](\.\./\|](docs/' docs/ | grep -v '\.png)'
+git grep -n -E 'docs/superpowers/|docs/proposals/user-centric-rbac'
 ```
-Fix any hit pointing at a moved RBAC path, and check `docs/permissions.md`
-specifically since it's the most likely doc to cross-reference the RBAC
+This is a repo-wide, tracked-files-only search covering Markdown inline
+links, Markdown reference-style link definitions, HTML `href=`/`src=`
+links, and absolute `/docs/...` references — not just `docs/` and not just
+Markdown. Fix any hit pointing at a moved RBAC path, and check
+`docs/permissions.md` specifically since it's the most likely doc to
+cross-reference the RBAC
 design.
 
 - [ ] **Step 6: Write `docs/README.md`**
