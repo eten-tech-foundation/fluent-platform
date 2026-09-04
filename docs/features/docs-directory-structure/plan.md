@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Migrate `docs/` in fluent-ai, fluent-api, fluent-mobile, and fluent-web to the feature-grouped structure defined in the spec, with history preserved and no broken links.
+**Goal:** Migrate `docs/` in fluent-ai, fluent-api, fluent-mobile, and fluent-web to the feature-grouped structure defined in the spec, with history preserved and no broken links, then make the structure self-sustaining via an AGENTS.md convention pointer and a CI check in each repo.
 
-**Architecture:** Per-repo, mechanical `git mv` of already-categorized docs (old `proposals/`, `superpowers/{plans,specs,reference}/`, `design/` folders) into `docs/features/<slug>/`, plus a small number of judgment calls for loose root-level docs and one drifted-slug cluster in fluent-api. Each repo gets a `docs/README.md` describing the convention. `runbooks/` and `guides/` are untouched except two mobile/ai reclassifications called out explicitly below.
+**Architecture:** Per-repo, mechanical `git mv` of already-categorized docs (old `proposals/`, `superpowers/{plans,specs,reference}/`, `design/` folders) into `docs/features/<slug>/`, plus a small number of judgment calls for loose root-level docs and one drifted-slug cluster in fluent-api. Each repo gets a `docs/README.md` describing the convention. `runbooks/` and `guides/` are untouched except two mobile/ai reclassifications called out explicitly below. A final task adds the two-layer enforcement from the spec: an AGENTS.md pointer (reaches convention-following agents, including the skill's documented override mechanism) and a CI structure check in each repo's existing pre-merge workflow (reaches everything else, since it doesn't depend on anyone having read anything first).
 
 **Tech Stack:** git (mv, log for history/dates), markdown link grep.
 
@@ -442,4 +442,174 @@ in fluent-platform for the full rationale.
 git status
 git add -A docs
 git commit -m "docs: reconcile scattered RBAC docs into a single feature folder"
+```
+
+---
+
+### Task 6: enforcement — AGENTS.md pointer + CI structure check (fluent-ai, fluent-api, fluent-mobile, fluent-web)
+
+Per the spec's Enforcement section: the convention layer (AGENTS.md) only
+reaches agents that read it before writing docs; the enforcement layer (CI)
+is what makes compliance hold regardless of who or what touched `docs/`.
+Both are added here, per repo. fluent-platform is out of scope (no CI
+workflows exist there yet — separate follow-up).
+
+**Files (each repo):**
+- Create: `scripts/check-docs-structure.sh`
+- Modify: repo's `AGENTS.md` (create fresh for fluent-api and fluent-web,
+  which have none; extend the existing one for fluent-ai and fluent-mobile)
+- Modify: `.github/workflows/pre-merge.yml` (fluent-ai, fluent-api,
+  fluent-web) or `.github/workflows/quality-gates.yml` (fluent-mobile) — add
+  a `docs-structure` job
+
+**Interfaces:**
+- Produces: `scripts/check-docs-structure.sh`, exit 0 if `docs/` matches the
+  allowed shape, exit 1 with one `::error::` line per violation otherwise.
+
+- [ ] **Step 1: Write the shared check script (identical content in all four repos)**
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+allowed=(features runbooks guides tasks)
+status=0
+shopt -s nullglob
+
+for d in docs/*/; do
+  name="$(basename "$d")"
+  ok=0
+  for a in "${allowed[@]}"; do
+    [[ "$name" == "$a" ]] && ok=1
+  done
+  if [[ "$ok" -eq 0 ]]; then
+    echo "::error::Unexpected top-level docs/ directory: docs/$name — allowed: ${allowed[*]} (plus loose *.md files at docs/ root). See docs/README.md."
+    status=1
+  fi
+done
+
+exit "$status"
+```
+
+Save this as `scripts/check-docs-structure.sh` in each of fluent-ai,
+fluent-api, fluent-mobile, fluent-web, then:
+
+```bash
+chmod +x scripts/check-docs-structure.sh
+```
+
+- [ ] **Step 2: Verify the script locally in each repo**
+
+```bash
+./scripts/check-docs-structure.sh && echo PASS
+```
+Expected: `PASS` in all four repos (Tasks 1–5 already brought `docs/` into
+the allowed shape). Then confirm it actually catches a violation:
+
+```bash
+mkdir -p docs/scratch-test && ./scripts/check-docs-structure.sh; rmdir docs/scratch-test
+```
+Expected: exits 1 with an `::error::` line naming `docs/scratch-test`.
+
+- [ ] **Step 3: Add the Docs pointer to fluent-ai's `AGENTS.md`**
+
+Append a new section:
+
+```markdown
+## Docs
+
+See `docs/README.md` for the docs directory convention. Brainstorming and
+writing-plans skill output goes to `docs/features/<slug>/`
+(`proposal.md`/`design.md`/`plan.md`/`tickets/`), not the skill's built-in
+`docs/superpowers/...` default.
+```
+
+- [ ] **Step 4: Add the Docs pointer to fluent-mobile's `AGENTS.md`**
+
+Add a row to the existing "For agents / tools" table:
+
+```markdown
+| [docs/README.md](docs/README.md) | Docs directory convention — features/, runbooks/, guides/, tasks/ |
+```
+
+- [ ] **Step 5: Create a minimal `AGENTS.md` for fluent-api**
+
+```markdown
+# AGENTS.md — Fluent API
+
+## Docs
+
+See `docs/README.md` for the docs directory convention. Brainstorming and
+writing-plans skill output goes to `docs/features/<slug>/`
+(`proposal.md`/`design.md`/`plan.md`/`tickets/`), not the skill's built-in
+`docs/superpowers/...` default.
+```
+
+- [ ] **Step 6: Create a minimal `AGENTS.md` for fluent-web**
+
+```markdown
+# AGENTS.md — Fluent Web
+
+## Docs
+
+See `docs/README.md` for the docs directory convention. Brainstorming and
+writing-plans skill output goes to `docs/features/<slug>/`
+(`proposal.md`/`design.md`/`plan.md`/`tickets/`), not the skill's built-in
+`docs/superpowers/...` default.
+```
+
+- [ ] **Step 7: Add the CI job to fluent-ai's `.github/workflows/pre-merge.yml`**
+
+Add a sibling job to the existing `validate` job (same file, `jobs:` at top level):
+
+```yaml
+    docs-structure:
+        name: Docs Structure Check
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        if: ${{ !github.event.pull_request.draft }}
+        steps:
+            - uses: actions/checkout@v4
+            - run: ./scripts/check-docs-structure.sh
+```
+Match the existing file's indentation style exactly (4-space, as seen in the
+`validate` job) rather than the 2-space shown here.
+
+- [ ] **Step 8: Add the CI job to fluent-api's `.github/workflows/pre-merge.yml`**
+
+Add a sibling job to the existing `validate` job:
+
+```yaml
+  docs-structure:
+    name: Docs Structure Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/check-docs-structure.sh
+```
+
+- [ ] **Step 9: Add the CI job to fluent-web's `.github/workflows/pre-merge.yml`**
+
+Same job definition as Step 8 (fluent-web's `validate` job uses the same
+2-space style).
+
+- [ ] **Step 10: Add the CI job to fluent-mobile's `.github/workflows/quality-gates.yml`**
+
+Add a sibling job alongside `typecheck`/`expo-doctor`/`expo-install-check`:
+
+```yaml
+  docs-structure:
+    name: Docs Structure Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/check-docs-structure.sh
+```
+
+- [ ] **Step 11: Commit, per repo**
+
+```bash
+git add scripts/check-docs-structure.sh AGENTS.md .github/workflows/
+git commit -m "ci: enforce docs/ directory structure convention"
 ```

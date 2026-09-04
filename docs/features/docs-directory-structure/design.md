@@ -48,7 +48,7 @@ about this feature."
 
 ## Structure
 
-```
+```text
 docs/
   <loose files>.md            # repo-wide reference docs: architecture.md,
                                # permissions.md, containerization.md, etc.
@@ -87,7 +87,8 @@ docs/
   `plans/YYYY-MM-DD-<phase>.md` (or `tickets/YYYY-MM-DD-<item>.md`) instead of
   a single file — same pattern already used for `tickets/`.
 - No `superpowers/` wrapper directory. Brainstorming/writing-plans skill
-  output is configured to write directly into `features/<slug>/`.
+  output is directed to write directly into `features/<slug>/` — see
+  Enforcement below for how this is actually made to hold.
 - A doc belongs in `tasks/` only if it has no parent feature. Once a task is
   understood to be part of a larger feature's work, it moves into that
   feature's `tickets/` subfolder instead. This is why the top-level dir is
@@ -95,6 +96,58 @@ docs/
   per-feature `tickets/` subfolder.
 - fluent-mobile's `design/` (visual mockups/screenshots) folds into the
   relevant feature folder as `features/<slug>/design/*.png`.
+
+## Enforcement
+
+The structure only holds if it's followed by whoever is writing docs next —
+and that's not always a Claude Code session running the superpowers skill.
+Three populations need to land in the right place, and only one of them is
+reachable by configuring a skill:
+
+1. **Agents running the brainstorming/writing-plans skills.** Their default
+   output locations (`docs/superpowers/specs/...`,
+   `docs/superpowers/plans/...`) are defined in the skill files under
+   `~/.claude/plugins/...` — global, not per-repo — but each skill documents
+   an override: "user preferences for spec/plan location override this
+   default." That override is only real if the agent has actually read a
+   repo-level instruction saying so before invoking the skill.
+2. **Any other agent or tool** (a different coding assistant, a script, a
+   human) that never invokes those skills in the first place. There is no
+   skill default to override for this population — telling the skill where
+   to write reaches nobody here.
+3. **Anyone editing docs by hand**, who follows whatever's discoverable, or
+   nothing at all if there's nothing to find.
+
+This means a single lever — configuring the skill — only reaches population
+1, and only in repos that have something for it to read. As of this writing
+only fluent-ai and fluent-mobile have an `AGENTS.md`/`CLAUDE.md` at all;
+fluent-api, fluent-web, and fluent-platform have none, so there is currently
+no file in three of five repos from which any agent could pick up the
+override.
+
+Two layers are needed, addressing different populations:
+
+- **Convention layer (populations 1 and 3):** every in-scope repo gets (or
+  extends) a root `AGENTS.md` with a short "Docs" section pointing at
+  `docs/README.md` and stating explicitly that brainstorming/writing-plans
+  output goes to `docs/features/<slug>/`, not the skill's built-in default.
+  `AGENTS.md` is used rather than `CLAUDE.md` because it's the more
+  tool-agnostic convention (read by multiple coding agents, not just Claude
+  Code) — where a repo already has both, both get the same pointer.
+- **Enforcement layer (all three populations, including population 2, which
+  the convention layer cannot reach at all):** a CI check, added to each
+  repo's existing pre-merge workflow, that fails a PR introducing a docs
+  layout violation — a top-level `docs/` directory outside the allowed set
+  (`features/`, `runbooks/`, `guides/`, `tasks/`, loose root `*.md`), most
+  importantly a reintroduced `docs/superpowers/` or `docs/proposals/`. This
+  is the only layer that doesn't depend on whoever changed `docs/` having
+  read anything first, which is what makes "any developer agent follows
+  this" actually true rather than aspirational.
+
+fluent-ai, fluent-api, fluent-mobile, and fluent-web all already have a
+`pre-merge.yml` workflow the check can be added to. fluent-platform has no
+CI workflows at all yet, so enforcement there needs a new workflow — that's
+separate scope from this migration, tracked but not included here.
 
 ## Migration
 
