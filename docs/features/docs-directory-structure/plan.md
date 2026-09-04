@@ -14,7 +14,7 @@
 
 - Every move uses `git mv` (or `git mv` + manual edit for renames), never delete+recreate — history must follow the file.
 - No `superpowers/` directory survives migration in any repo.
-- Feature folders use fixed stage filenames (`proposal.md`, `design.md`, `plan.md`) only when a file maps 1:1 onto that stage; otherwise keep the original descriptive filename inside the feature folder rather than force a bad fit.
+- Feature folder file naming follows the spec's three cases: (1) one document per stage → fixed name (`proposal.md`/`design.md`/`plan.md`); (2) multiple documents for the same stage → dated files, either flat in the feature folder prefixed with the stage name or under a `plans/`/`tickets/` subfolder; (3) a document that doesn't map onto proposal/design/plan at all → keep its original descriptive filename. See the spec's Rules section for full detail.
 - After each repo's moves, grep the whole `docs/` tree for markdown relative links (`](./` and `](../` and bare `](docs/`) that reference moved paths, and fix them.
 - Each task ends in one commit on the target repo's current branch (do not create new branches — each repo is already on its own working branch). A repo's migration may span multiple tasks — fluent-api is split across Task 4 (mechanical moves) and Task 5 (RBAC cluster reconciliation) — each producing its own commit.
 - fluent-platform is explicitly out of scope for this plan (deferred per spec).

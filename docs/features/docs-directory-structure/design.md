@@ -81,11 +81,23 @@ docs/
 
 - A feature folder holds only the stages that actually exist for it — no
   empty placeholder files.
-- File names inside a feature folder are fixed (`proposal.md`, `design.md`,
-  `plan.md`), not dated. Git history covers revisions. If a feature genuinely
-  needs multiple plan revisions or phases living side by side, use
-  `plans/YYYY-MM-DD-<phase>.md` (or `tickets/YYYY-MM-DD-<item>.md`) instead of
-  a single file — same pattern already used for `tickets/`.
+- File names inside a feature folder follow three cases, in order:
+  1. **One document per stage:** fixed name (`proposal.md`, `design.md`,
+     `plan.md`), not dated. Git history covers revisions. This is the
+     required shape for anything the brainstorming/writing-plans skills
+     produce going forward.
+  2. **Multiple documents for the same stage** (revisions, phases, or —
+     during migration — pre-existing dated files that don't collapse into
+     one): dated files, either directly in the feature folder prefixed
+     with the stage name (e.g. `2026-07-06-plan-review-fixes.md`) or under
+     a `plans/YYYY-MM-DD-<phase>.md` / `tickets/YYYY-MM-DD-<item>.md`
+     subfolder — same pattern already used for `tickets/`. New work
+     defaults to the subfolder form; migrated content may keep whichever
+     of the two it already had.
+  3. **Documents that don't map onto proposal/design/plan at all**
+     (a supplementary assessment, a review doc, a technical reference):
+     keep the original descriptive filename — do not force a rename that
+     doesn't fit.
 - No `superpowers/` wrapper directory. Brainstorming/writing-plans skill
   output is directed to write directly into `features/<slug>/` — see
   Enforcement below for how this is actually made to hold.
