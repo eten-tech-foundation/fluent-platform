@@ -40,7 +40,7 @@
 - [ ] **Step 1: Perform the moves**
 
 ```bash
-cd /Users/kasey/code/github.com/eten-tech-foundation/fluent-ai
+cd <path-to-fluent-ai-checkout>  # repository root
 mkdir -p docs/features/fastapi-structure-standardization \
          docs/features/ai-suggestions \
          docs/features/cicd-pipeline \
@@ -124,7 +124,7 @@ git commit -m "docs: migrate to feature-grouped docs structure"
 - [ ] **Step 1: Perform the moves**
 
 ```bash
-cd /Users/kasey/code/github.com/eten-tech-foundation/fluent-mobile
+cd <path-to-fluent-mobile-checkout>  # repository root
 mkdir -p docs/features/record-tab
 git mv docs/design/record-tab docs/features/record-tab/design
 find docs/design -type d -empty -delete
@@ -194,7 +194,7 @@ git commit -m "docs: migrate to feature-grouped docs structure"
 - [ ] **Step 1: Perform the moves**
 
 ```bash
-cd /Users/kasey/code/github.com/eten-tech-foundation/fluent-web
+cd <path-to-fluent-web-checkout>  # repository root
 mkdir -p docs/features docs/features/qa-environment-and-release-tooling
 
 git mv docs/proposals/lynx-client-usfm-poc docs/features/lynx-client-usfm-poc
@@ -273,7 +273,7 @@ git commit -m "docs: migrate to feature-grouped docs structure"
 - [ ] **Step 1: Determine the date prefix for the temp file**
 
 ```bash
-cd /Users/kasey/code/github.com/eten-tech-foundation/fluent-api
+cd <path-to-fluent-api-checkout>  # repository root
 git log --diff-filter=A --format=%ad --date=short -- docs/temp-pm-project-create-bypass.md | tail -1
 ```
 Use the printed date (format `YYYY-MM-DD`) as `<first-commit-date>` below.
@@ -360,7 +360,7 @@ duplicate reference files. This task reconciles them into one
 - [ ] **Step 1: Read both candidate technical-reference files and diff them**
 
 ```bash
-cd /Users/kasey/code/github.com/eten-tech-foundation/fluent-api
+cd <path-to-fluent-api-checkout>  # repository root
 diff docs/superpowers/reference/rbac_technical_reference_anu.md \
      docs/superpowers/plans/rbac_technical_reference.md
 ```
