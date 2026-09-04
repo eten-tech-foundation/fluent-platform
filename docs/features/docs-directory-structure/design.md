@@ -148,7 +148,7 @@ Two layers are needed, addressing different populations:
   Code) — where a repo already has both, both get the same pointer.
 - **Enforcement layer (all three populations, including population 2, which
   the convention layer cannot reach at all):** a CI check, added to each
-  repo's existing pre-merge workflow, that fails a PR introducing a docs
+  repo's existing PR-gating workflow, that fails a PR introducing a docs
   layout violation — a top-level `docs/` directory outside the allowed set
   (`features/`, `runbooks/`, `guides/`, `tasks/`, loose root `*.md`), most
   importantly a reintroduced `docs/superpowers/` or `docs/proposals/`. This
@@ -156,8 +156,10 @@ Two layers are needed, addressing different populations:
   read anything first, which is what makes "any developer agent follows
   this" actually true rather than aspirational.
 
-fluent-ai, fluent-api, fluent-mobile, and fluent-web all already have a
-`pre-merge.yml` workflow the check can be added to. fluent-platform has no
+fluent-ai, fluent-api, and fluent-web already have a `pre-merge.yml`
+workflow the check can be added to. fluent-mobile has no `pre-merge.yml` —
+its equivalent PR-gating workflow is `quality-gates.yml`, which is where
+its check lands instead (see Task 6 in the plan). fluent-platform has no
 CI workflows at all yet, so enforcement there needs a new workflow — that's
 separate scope from this migration, tracked but not included here.
 
