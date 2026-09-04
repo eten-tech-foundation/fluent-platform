@@ -8,7 +8,7 @@
 
 **Tech Stack:** Bash, Docker Compose v2 (`docker compose`), Podman pods, YAML compose files.
 
-**Spec:** `docs/superpowers/specs/2026-06-14-container-naming-passthrough-design.md`
+**Spec:** `docs/features/container-naming-passthrough/design.md`
 
 ---
 
