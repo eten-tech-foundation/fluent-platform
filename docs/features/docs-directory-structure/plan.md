@@ -141,7 +141,7 @@ Expected: `OK`
 - [ ] **Step 3: Audit the whole repository for references to moved paths**
 
 ```bash
-git grep -n -E 'docs/design/record-tab'
+git grep -n -E 'docs/design'
 ```
 This is a repo-wide, tracked-files-only search covering Markdown inline
 links, Markdown reference-style link definitions, HTML `href=`/`src=`
