@@ -108,7 +108,7 @@ in fluent-platform for the full rationale.
 
 ```bash
 git status
-git add -A docs
+git add -A
 git commit -m "docs: migrate to feature-grouped docs structure"
 ```
 
@@ -181,7 +181,7 @@ in fluent-platform for the full rationale.
 
 ```bash
 git status
-git add -A docs
+git add -A
 git commit -m "docs: migrate to feature-grouped docs structure"
 ```
 
@@ -255,7 +255,7 @@ in fluent-platform for the full rationale.
 
 ```bash
 git status
-git add -A docs
+git add -A
 git commit -m "docs: migrate to feature-grouped docs structure"
 ```
 
@@ -358,7 +358,7 @@ Fix any hit whose target path was moved above.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A docs
+git add -A
 git commit -m "docs: migrate mechanical portion of docs to feature-grouped structure"
 ```
 
@@ -376,7 +376,7 @@ duplicate reference files. This task reconciles them into one
 **Files:**
 - Move: `docs/superpowers/specs/2026-06-02-user-central-tenant-rbac-design.md` → `docs/features/user-centric-rbac/design.md`
 - Move: `docs/superpowers/plans/2026-06-02-user-central-tenant-rbac.md` → `docs/features/user-centric-rbac/plan.md`
-- Move: `docs/proposals/user-centric-rbac/2026-07-02-org-membership-and-solo-workflow-design.md` → `docs/features/user-centric-rbac/design-org-membership-extension.md`
+- Move: `docs/proposals/user-centric-rbac/2026-07-02-org-membership-and-solo-workflow-design.md` → `docs/features/user-centric-rbac/2026-07-02-design-org-membership-extension.md`
 - Move: `docs/superpowers/reference/2026-06-02-user-central-tenent.md` → `docs/features/user-centric-rbac/reference/2026-06-02-tenant-diagram.md`
 - Compare and dedupe: `docs/superpowers/reference/rbac_technical_reference_anu.md` vs `docs/superpowers/plans/rbac_technical_reference.md`
 
@@ -404,7 +404,7 @@ git mv docs/superpowers/specs/2026-06-02-user-central-tenant-rbac-design.md \
 git mv docs/superpowers/plans/2026-06-02-user-central-tenant-rbac.md \
        docs/features/user-centric-rbac/plan.md
 git mv docs/proposals/user-centric-rbac/2026-07-02-org-membership-and-solo-workflow-design.md \
-       docs/features/user-centric-rbac/design-org-membership-extension.md
+       docs/features/user-centric-rbac/2026-07-02-design-org-membership-extension.md
 git mv docs/superpowers/reference/2026-06-02-user-central-tenent.md \
        docs/features/user-centric-rbac/reference/2026-06-02-tenant-diagram.md
 ```
@@ -469,7 +469,7 @@ in fluent-platform for the full rationale.
 
 ```bash
 git status
-git add -A docs
+git add -A
 git commit -m "docs: reconcile scattered RBAC docs into a single feature folder"
 ```
 
@@ -505,15 +505,22 @@ allowed=(features runbooks guides tasks)
 status=0
 shopt -s nullglob
 
-for d in docs/*/; do
-  name="$(basename "$d")"
-  ok=0
-  for a in "${allowed[@]}"; do
-    [[ "$name" == "$a" ]] && ok=1
-  done
-  if [[ "$ok" -eq 0 ]]; then
-    echo "::error::Unexpected top-level docs/ directory: docs/$name — allowed: ${allowed[*]} (plus loose *.md files at docs/ root). See docs/README.md."
-    status=1
+for entry in docs/*; do
+  name="$(basename "$entry")"
+  if [[ -d "$entry" ]]; then
+    ok=0
+    for a in "${allowed[@]}"; do
+      [[ "$name" == "$a" ]] && ok=1
+    done
+    if [[ "$ok" -eq 0 ]]; then
+      echo "::error::Unexpected top-level docs/ directory: docs/$name — allowed: ${allowed[*]} (plus loose *.md files at docs/ root). See docs/README.md."
+      status=1
+    fi
+  elif [[ -f "$entry" ]]; then
+    if [[ "$name" != *.md ]]; then
+      echo "::error::Unexpected top-level docs/ file: docs/$name — only *.md files are allowed loose at docs/ root. See docs/README.md."
+      status=1
+    fi
   fi
 done
 
@@ -536,9 +543,13 @@ Expected: `PASS` in all four repos (Tasks 1–5 already brought `docs/` into
 the allowed shape). Then confirm it actually catches a violation:
 
 ```bash
-mkdir -p docs/scratch-test && ./scripts/check-docs-structure.sh; rmdir docs/scratch-test
+mkdir -p docs/scratch-test
+./scripts/check-docs-structure.sh; status=$?
+rmdir docs/scratch-test
+echo "exit status: $status"
+[[ "$status" -eq 1 ]] && echo "PASS (correctly failed)" || echo "FAIL (expected exit 1, got $status)"
 ```
-Expected: exits 1 with an `::error::` line naming `docs/scratch-test`.
+Expected: an `::error::` line naming `docs/scratch-test`, then `PASS (correctly failed)`.
 
 - [ ] **Step 3: Add the Docs pointer to fluent-ai's `AGENTS.md`**
 
