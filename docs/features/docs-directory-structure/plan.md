@@ -604,11 +604,16 @@ Add a sibling job to the existing `validate` job (same file, `jobs:` at top leve
         timeout-minutes: 5
         if: ${{ !github.event.pull_request.draft }}
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
             - run: ./scripts/check-docs-structure.sh
 ```
 Match the existing file's indentation style exactly (4-space, as seen in the
-`validate` job) rather than the 2-space shown here.
+`validate` job) rather than the 2-space shown here. Use whatever pinned
+`checkout` SHA/version comment the repo's other jobs already use if it
+differs from the one above — match the existing convention, don't
+introduce a second one.
 
 - [ ] **Step 8: Add the CI job to fluent-api's `.github/workflows/pre-merge.yml`**
 
@@ -620,25 +625,36 @@ Add a sibling job to the existing `validate` job:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - run: ./scripts/check-docs-structure.sh
 ```
+Use whatever pinned `checkout` SHA/version comment fluent-api's other jobs
+already use if it differs from the one above — match the existing
+convention, don't introduce a second one.
 
 - [ ] **Step 9: Add the CI job to fluent-web's `.github/workflows/pre-merge.yml`**
 
 Same job definition as Step 8 (fluent-web's `validate` job uses the same
-2-space style).
+2-space style; same note about matching fluent-web's existing pinned
+`checkout` version if it differs).
 
 - [ ] **Step 10: Add the CI job to fluent-mobile's `.github/workflows/quality-gates.yml`**
 
-Add a sibling job alongside `typecheck`/`expo-doctor`/`expo-install-check`:
+Add a sibling job alongside `typecheck`/`expo-doctor`/`expo-install-check`.
+fluent-mobile's `action-pins` check requires every action pinned to a
+commit SHA — match the `checkout` pin the other jobs in this file already
+use:
 
 ```yaml
   docs-structure:
     name: Docs Structure Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - run: ./scripts/check-docs-structure.sh
 ```
 
