@@ -281,7 +281,7 @@ Use the printed date (format `YYYY-MM-DD`) as `<first-commit-date>` below.
 - [ ] **Step 2: Perform the moves**
 
 ```bash
-mkdir -p docs/features/feature-flags docs/features/ethnologue-language-import \
+mkdir -p docs/features/ethnologue-language-import \
          docs/features/milestones \
          docs/features/betterauth-scripts-and-seeds \
          docs/features/account-self-management \
