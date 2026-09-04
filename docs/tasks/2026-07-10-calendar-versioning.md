@@ -66,7 +66,7 @@ Surface the running version somewhere observable post-deploy — e.g. fluent-api
 
 ## fluent-ai: convention now, automation later
 
-fluent-ai currently has **no GitHub Actions workflows at all** — no PR checks, no build, no deploy pipeline. There's nothing to hook a PROD-deploy version bump into yet. Per `fluent-ai/docs/superpowers/specs/2026-04-17-gitops-roadmap.md`, Phase 2 of that repo's own CI/CD rollout explicitly lists "tagging strategy" as an open decision.
+fluent-ai currently has **no GitHub Actions workflows at all** — no PR checks, no build, no deploy pipeline. There's nothing to hook a PROD-deploy version bump into yet. Per `fluent-ai/docs/features/gitops-roadmap/design.md`, Phase 2 of that repo's own CI/CD rollout explicitly lists "tagging strategy" as an open decision.
 
 For this ticket:
 - Adopt the same `YY.MM.SERIAL` convention for `pyproject.toml`'s `version` field.
@@ -81,7 +81,7 @@ For this ticket:
 4. **fluent-web**: same as 1–3, adapted to `post-merge-deploy.yml`'s static-web-app deploy job.
 5. **fluent-ai**: bump `pyproject.toml` to `26.7.0` (or similar) as a one-time convention-adoption commit; no CI automation yet.
 6. **fluent-platform** (or wherever cross-repo docs live): document the scheme and the `bump-version` pattern once, referenced by all repos, so future services (fluent-ai included) implement it the same way instead of reinventing it.
-7. Update `fluent-ai/docs/superpowers/specs/2026-04-17-gitops-roadmap.md` to point at this ticket for the Phase 2 tagging-strategy decision.
+7. Update `fluent-ai/docs/features/gitops-roadmap/design.md` to point at this ticket for the Phase 2 tagging-strategy decision.
 
 ## Testing / verification strategy
 
