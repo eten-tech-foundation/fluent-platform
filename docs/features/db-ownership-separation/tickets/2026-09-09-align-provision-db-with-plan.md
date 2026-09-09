@@ -1,6 +1,9 @@
 # Align `provision-db.ts` (dev/qa) with the DB ownership separation model
 
-> **Status: IN REVIEW** — [fluent-api#322](https://github.com/eten-tech-foundation/fluent-api/pull/322)
+> **Status: IN REVIEW** — [fluent-api#322](https://github.com/eten-tech-foundation/fluent-api/pull/322).
+> Tasks 1–5 implemented; CodeRabbit's first review round (4 actionable + 1
+> nitpick) addressed and replied to on the PR. Task 6 (live verification
+> against Azure dev/qa) and the outstanding docs guide below remain.
 
 **Parent feature:** [`db-ownership-separation`](../plan.md) — implemented for local
 Docker (standalone + platform) via `bootstrap.ts` (fluent-api) and
@@ -70,41 +73,41 @@ reassignment / bootstrap-user-role-grant logic that already exists in
 
 **File:** `fluent-api/src/db/scripts/provision-db.ts`
 
-- [ ] Remove the group-role layer entirely: delete `role_web_data`,
+- [x] Remove the group-role layer entirely: delete `role_web_data`,
       `role_ai_data`, `role_ai_reader`, `role_pgboss_user`, `role_migrations`
       and the `ensureGroupRole`/`grantRole`-to-login-role plumbing built
       around them.
-- [ ] Replace the 4 login roles with `api_migrator`, `api_user`,
+- [x] Replace the 4 login roles with `api_migrator`, `api_user`,
       `ai_migrator`, `ai_user` (drop `db_admin` and `migrations`).
-- [ ] Schema ownership: `public` and `drizzle` → `api_migrator`; `ai` →
+- [x] Schema ownership: `public` and `drizzle` → `api_migrator`; `ai` →
       `ai_migrator`; `pgboss` → `api_user` (`AUTHORIZATION`, matching
       `bootstrap.ts`'s pgboss-owned-by-runtime-role contract in
       `queue.ts`).
-- [ ] Schema-level grants: `api_user` gets `USAGE` + DML on `public` only;
+- [x] Schema-level grants: `api_user` gets `USAGE` + DML on `public` only;
       `ai_user` gets `USAGE` + DML on `ai` only. **No grant of any kind for
       `ai_user` on `public`, and none for `api_user` on `ai`.**
-- [ ] `api_migrator` gets `USAGE, CREATE` on `public`/`drizzle`/`pgboss`
+- [x] `api_migrator` gets `USAGE, CREATE` on `public`/`drizzle`/`pgboss`
       only (not `ai`); `ai_migrator` gets `USAGE, CREATE` on `ai` only (not
       `public`/`drizzle`/`pgboss`). Each also needs `CREATE ON DATABASE`
       only if its own migration tool requires it (drizzle-kit's
       `CREATE SCHEMA IF NOT EXISTS drizzle` check — Alembic does not need
       this).
-- [ ] Bootstrap-user role grants (the Azure `azure_pg_admin` workaround at
+- [x] Bootstrap-user role grants (the Azure `azure_pg_admin` workaround at
       the end of step 3): grant `api_migrator` and `ai_migrator` to the
       connecting bootstrap user instead of `db_admin`/`migrations`, so
       `ALTER DEFAULT PRIVILEGES FOR ROLE <role>` still succeeds on
       non-superuser hosts.
-- [ ] Ownership reassignment of pre-existing objects (current step 6):
+- [x] Ownership reassignment of pre-existing objects (current step 6):
       split by schema — `public`/`drizzle` tables/sequences/views/enums →
       owner `api_migrator`; `ai` schema objects → owner `ai_migrator`.
       `pgboss` is excluded (already owned by `api_user`, unchanged).
-- [ ] Default privileges (current step 7): mirror `bootstrap.ts`/
+- [x] Default privileges (current step 7): mirror `bootstrap.ts`/
       `bootstrap.py` — `ALTER DEFAULT PRIVILEGES FOR ROLE api_migrator IN
       SCHEMA public/drizzle GRANT ... TO api_user`, and `FOR ROLE
       ai_migrator IN SCHEMA ai GRANT ... TO ai_user`. Drop every default-
       privilege statement that touches `role_ai_reader` or the old
       `role_web_data`/`role_ai_data` names.
-- [ ] Update the file's header comment (lines 1–52) to describe the new
+- [x] Update the file's header comment (lines 1–52) to describe the new
       model instead of the old one.
 
 ### Task 2: Update `DbProvisionConfig` and env-configs
@@ -114,16 +117,23 @@ reassignment / bootstrap-user-role-grant logic that already exists in
 - `fluent-api/src/db/env-configs/dev.ts`
 - `fluent-api/src/db/env-configs/qa.ts`
 
-- [ ] Replace `dbAdminPassword`/`migrationsPassword`/`webUserPassword` in
+- [x] Replace `dbAdminPassword`/`migrationsPassword`/`webUserPassword` in
       `DbProvisionConfig` with `apiMigratorPassword`/`apiUserPassword`/
       `aiMigratorPassword` (keep `aiUserPassword`).
-- [ ] Update `dev.ts`/`qa.ts` `provision` blocks to read
+- [x] Update `dev.ts`/`qa.ts` `provision` blocks to read
       `API_MIGRATOR_PASSWORD`, `API_USER_PASSWORD`, `AI_MIGRATOR_PASSWORD`,
       `AI_USER_PASSWORD` from env instead of `DB_ADMIN_PASSWORD`/
       `MIGRATIONS_PASSWORD`/`WEB_USER_PASSWORD`.
-- [ ] Update `provision-db.ts`'s `main()` required-vars block (currently
+- [x] Update `provision-db.ts`'s `main()` required-vars block (currently
       `DB_ADMIN_PASSWORD`/`MIGRATIONS_PASSWORD`/`WEB_USER_PASSWORD`/
       `AI_USER_PASSWORD`) to match.
+- [x] **Addendum (from PR review):** removed `DEV_MIGRATIONS_DATABASE_URL`/
+      `QA_MIGRATIONS_DATABASE_URL` and the `migrationsUrl` field on
+      `EnvConfig` entirely — there was no reason for per-environment
+      variants. `setup.ts` no longer resolves them; `MIGRATIONS_DATABASE_URL`
+      is now the one variable for every environment, read directly by
+      `drizzle.config.ts`, the same way `BOOTSTRAP_DATABASE_URL` already
+      works.
 
 ### Task 3: Coordinate secret renames in dev/qa (outside this repo's code)
 
@@ -132,10 +142,13 @@ reassignment / bootstrap-user-role-grant logic that already exists in
       `WEB_USER_PASSWORD` to `API_MIGRATOR_PASSWORD`, `API_USER_PASSWORD`,
       `AI_MIGRATOR_PASSWORD` — coordinate timing with whoever runs
       `db:provision:dev`/`db:provision:qa` so a stale secret doesn't
-      silently provision the old role names.
-- [ ] Update `DEV_DATABASE_URL`/`DEV_MIGRATIONS_DATABASE_URL`/
-      `QA_DATABASE_URL`/`QA_MIGRATIONS_DATABASE_URL` app-config values to
-      use `api_user`/`api_migrator` instead of `web_user`/`migrations`.
+      silently provision the old role names. **Also drop
+      `DEV_MIGRATIONS_DATABASE_URL`/`QA_MIGRATIONS_DATABASE_URL` in favor of
+      a single `MIGRATIONS_DATABASE_URL`** — code no longer reads the
+      per-environment variants (see Task 2 addendum above).
+- [ ] Update `DEV_DATABASE_URL`/`MIGRATIONS_DATABASE_URL`/
+      `QA_DATABASE_URL` app-config values to use `api_user`/`api_migrator`
+      instead of `web_user`/`migrations`.
 - [ ] This is a **breaking, hard-to-reverse change against shared dev/qa
       infrastructure** — run it only against a fresh/resettable dev DB
       first, and get sign-off before applying to qa. Leave the legacy
@@ -166,19 +179,21 @@ that service down.
 `db:provision:*` or any entrypoint), following the same
 superuser-bootstrap-connection pattern as `provision-db.ts`.
 
-- [ ] **Precondition check (script refuses to proceed if this fails):**
-      query `pg_tables`/`pg_sequences`/`pg_views`/`pg_type` ownership plus
-      `information_schema.schemata` owners for `public`/`ai`/`drizzle`/
-      `pgboss` and confirm nothing is still owned by `db_admin`,
-      `migrations`, or `web_user` — i.e. confirm the Task 1 ownership
-      reassignment actually took effect in this environment before
-      touching anything.
-- [ ] **Report before act:** print what each legacy role currently owns or
+- [x] **Precondition check (script refuses to proceed if this fails):**
+      query schema ownership (`pg_namespace`) and `pg_class` ownership
+      (covers tables/views/materialized views/sequences/indexes) for
+      `public`/`ai`/`drizzle`/`pgboss` and confirm nothing is still owned by
+      `db_admin`, `migrations`, or `web_user`. **Extended per PR review:**
+      also check `pg_type` (enums) and `pg_proc` (functions/procedures)
+      ownership, since `pg_class` doesn't cover either — closes a gap where
+      a legacy-owned object of one of those kinds could pass this
+      precondition and then be silently removed by `DROP OWNED BY` below.
+- [x] **Report before act:** print what each legacy role currently owns or
       has privileges on (`DROP OWNED BY <role>` with no prior `CASCADE`
       will error out naming the first blocking dependency — surface that
       instead of swallowing it) so a leftover dependency is caught, not
       silently cascaded away.
-- [ ] For each of `role_web_data`, `role_ai_data`, `role_ai_reader`,
+- [x] For each of `role_web_data`, `role_ai_data`, `role_ai_reader`,
       `role_pgboss_user`, `role_migrations`, `db_admin`, `migrations`,
       `web_user`: `DROP OWNED BY <role>;` (clears any remaining ACL
       entries and default-privilege catalog rows the role set, e.g. the
@@ -187,13 +202,13 @@ superuser-bootstrap-connection pattern as `provision-db.ts`.
       order doesn't matter for correctness (`DROP OWNED BY` doesn't
       require membership to be revoked first) but keeps the output
       legible.
-- [ ] Do **not** pass `CASCADE` to `DROP OWNED BY` by default — if it
+- [x] Do **not** pass `CASCADE` to `DROP OWNED BY` by default — if it
       errors, that means something still depends on a legacy role that
       Task 1's reassignment missed, which needs investigating, not
       papering over.
 - [ ] Run against dev first, confirm the app still passes health checks
       post-cleanup, then repeat against qa.
-- [ ] Commit the cleanup script (don't delete it after running — it's the
+- [x] Commit the cleanup script (don't delete it after running — it's the
       record of what was removed and how, and gives qa/any future
       environment the same reproducible path).
 
@@ -201,13 +216,13 @@ superuser-bootstrap-connection pattern as `provision-db.ts`.
 
 **File:** `fluent-api/docs/db-provisioning-and-setup.md`
 
-- [ ] Replace the role/group tables (group roles, role→login membership,
+- [x] Replace the role/group tables (group roles, role→login membership,
       the `db_admin`/`migrations`/`web_user` names) with the corrected
       4-role model.
-- [ ] Update all example connection strings, env var names
+- [x] Update all example connection strings, env var names
       (`DB_ADMIN_PASSWORD` → `API_MIGRATOR_PASSWORD`, etc.), and the
       `web_user`/`migrations` references throughout.
-- [ ] Update the stray comments in `src/lib/queue.ts` and
+- [x] Update the stray comments in `src/lib/queue.ts` and
       `src/db/scripts/setup.ts` that still say "`web_user` in dev/qa,
       `api_user` locally" — after this change it's `api_user` in both.
 
@@ -225,6 +240,20 @@ superuser-bootstrap-connection pattern as `provision-db.ts`.
 - [ ] Run `db:setup:dev` after provisioning and confirm migrations +
       seeds succeed as `api_migrator`/`api_user`.
 - [ ] Grep guard: `grep -rn "db_admin\|role_ai_reader\|role_web_data\|role_ai_data\|role_pgboss_user\|role_migrations" fluent-api` → no matches outside git history.
+
+## Outstanding
+
+- [ ] **Write a concise provisioning guide for `fluent-api/docs/`**, covering
+      how and when to run `provision-db.ts`, `cleanup-legacy-provisioning.ts`,
+      and `setup.ts` against dev/qa — the order they run in, what each one
+      assumes is already true before it runs (e.g. cleanup's precondition
+      gate), and the minimum env vars each needs. `db-provisioning-and-setup.md`
+      already exists as a broader reference doc; this guide should be the
+      short, task-oriented "how do I actually run this" companion to it, not
+      a duplicate. **Do this only after Task 6 (live verification) is done
+      and the PR is passing** — writing it before the scripts are proven
+      against real dev/qa risks documenting a procedure that doesn't
+      actually work end-to-end.
 
 ## Out of scope
 
