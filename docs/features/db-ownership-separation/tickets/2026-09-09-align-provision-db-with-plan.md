@@ -1,6 +1,6 @@
 # Align `provision-db.ts` (dev/qa) with the DB ownership separation model
 
-> **Status: PROPOSED**
+> **Status: IN REVIEW** — [fluent-api#322](https://github.com/eten-tech-foundation/fluent-api/pull/322)
 
 **Parent feature:** [`db-ownership-separation`](../plan.md) — implemented for local
 Docker (standalone + platform) via `bootstrap.ts` (fluent-api) and
