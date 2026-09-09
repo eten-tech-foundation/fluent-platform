@@ -270,17 +270,18 @@ plan's phrasing implies.
 
 ## Outstanding
 
-- [ ] **Write a concise provisioning guide for `fluent-api/docs/`**, covering
+- [x] **Write a concise provisioning guide for `fluent-api/docs/`**, covering
       how and when to run `provision-db.ts`, `cleanup-legacy-provisioning.ts`,
-      and `setup.ts` against dev/qa — the order they run in, what each one
-      assumes is already true before it runs (e.g. cleanup's precondition
-      gate), and the minimum env vars each needs. `db-provisioning-and-setup.md`
-      already exists as a broader reference doc; this guide should be the
-      short, task-oriented "how do I actually run this" companion to it, not
-      a duplicate. **Do this only after Task 6 (live verification) is done
-      and the PR is passing** — writing it before the scripts are proven
-      against real dev/qa risks documenting a procedure that doesn't
-      actually work end-to-end.
+      and `setup.ts` against dev/qa. Written after `provision-db.ts`,
+      `db:migrate`, and both cross-schema denial checks were confirmed
+      against the live dev DB (Task 6 above) — see
+      [`docs/runbooks/db-provisioning.md`](https://github.com/eten-tech-foundation/fluent-api/blob/main/docs/runbooks/db-provisioning.md)
+      in `fluent-api` (PR
+      [#325](https://github.com/eten-tech-foundation/fluent-api/pull/325)).
+      Note: qa verification and the cleanup script's live run are still
+      outstanding (see Task 3/4/6 above), so the guide's coverage of
+      `cleanup-legacy-provisioning.ts` and the qa path is written from the
+      design/dev-tested side, not yet from a qa dry run.
 
 ## Out of scope
 
