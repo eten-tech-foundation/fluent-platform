@@ -2,8 +2,11 @@
 
 > **Status: IN REVIEW** — [fluent-api#322](https://github.com/eten-tech-foundation/fluent-api/pull/322).
 > Tasks 1–5 implemented; CodeRabbit's first review round (4 actionable + 1
-> nitpick) addressed and replied to on the PR. Task 6 (live verification
-> against Azure dev/qa) and the outstanding docs guide below remain.
+> nitpick) addressed and replied to on the PR. Task 6 verified against dev
+> (roles, schema ownership, cross-schema denial both directions, migrations)
+> except the `db:setup:dev` seed step, held off intentionally. Task 3
+> (live secret rename), the same verification against qa, and the
+> outstanding docs guide below remain.
 
 **Parent feature:** [`db-ownership-separation`](../plan.md) — implemented for local
 Docker (standalone + platform) via `bootstrap.ts` (fluent-api) and
@@ -228,18 +231,42 @@ superuser-bootstrap-connection pattern as `provision-db.ts`.
 
 ### Task 6: Verify
 
-- [ ] Run `db:provision:dev` against a disposable/reset dev DB. Confirm via
-      `\du` that only `api_migrator`, `api_user`, `ai_migrator`, `ai_user`
-      exist (plus the Azure admin) — no `db_admin`, `migrations`,
-      `web_user`, or `role_*` roles.
-- [ ] `SET ROLE ai_user; SELECT * FROM public.<any table> LIMIT 1;` →
-      permission denied (mirrors the local `bootstrap.py` verification in
-      the parent plan's Task B6).
-- [ ] `SET ROLE api_user; SELECT * FROM ai.<any table> LIMIT 1;` →
-      permission denied.
-- [ ] Run `db:setup:dev` after provisioning and confirm migrations +
-      seeds succeed as `api_migrator`/`api_user`.
-- [ ] Grep guard: `grep -rn "db_admin\|role_ai_reader\|role_web_data\|role_ai_data\|role_pgboss_user\|role_migrations" fluent-api` → no matches outside git history.
+Run against the real dev DB (not a disposable/reset instance — see note
+below) on 2026-09-09.
+
+- [x] Ran `db:provision:dev` against dev. Succeeded. Role listing (via a
+      one-off script using the `postgres` package already in
+      `node_modules` — no `psql` installed locally) confirmed only
+      `api_migrator`, `api_user`, `ai_migrator`, `ai_user` exist as
+      app-managed roles — no `db_admin`, `migrations`, `web_user`, or
+      `role_*`. (Also present: `app_user`, `fluentadmin`, `scribedb_dev`,
+      `scribedb_admin`, plus Azure platform roles — pre-existing,
+      unrelated to this feature, confirmed to own nothing in
+      `public`/`ai`/`drizzle`/`pgboss`.) Schema ownership also confirmed
+      exactly as designed: `public`/`drizzle` → `api_migrator`, `ai` →
+      `ai_migrator`, `pgboss` → `api_user`.
+- [x] Connecting directly as `ai_user` (not `SET ROLE` — `azure_pg_admin`
+      has no membership in `ai_user`, so `SET ROLE ai_user` itself fails;
+      connecting with `ai_user`'s own credentials is both simpler and
+      matches how the app actually connects) and querying
+      `public.roles` → `permission denied for table roles` (42501), as
+      expected. `ai_user` can still query the `ai` schema without error.
+- [x] Same approach as `api_user` against `ai.api_keys` →
+      `permission denied for schema ai` (42501), as expected.
+- [ ] `db:setup:dev` not run (writes real seed data to the shared dev DB —
+      held off per instruction). Substituted: ran `db:migrate` directly
+      against dev (same connection string, idempotent) — succeeded. This
+      confirms migrations apply cleanly under the new roles; the seed step
+      remains unexercised against dev.
+- [x] (with caveat) Grep guard: `grep -rn "db_admin\|role_ai_reader\|role_web_data\|role_ai_data\|role_pgboss_user\|role_migrations" fluent-api` does **not** come back clean as literally worded — every hit is intentional, not drift: `cleanup-legacy-provisioning.ts` references the legacy names by design (it's the script that finds and drops them), and `docs/ai-suggestions-workflow.md` has one historical "Before:" mention of `role_ai_reader`. No accidental leftover reference found. The guard's wording should be loosened to exclude those two known-intentional locations rather than read literally.
+
+**Note:** this ran against the live dev DB, not a disposable/reset one as
+the checklist originally specified — dev doesn't currently have a
+throwaway instance to provision against fresh. Since `provision-db.ts` is
+documented as idempotent and additive (Task 1), this is expected to be
+equivalent, and the results bear that out, but it means Task 6 hasn't
+literally exercised the "fresh Azure Flexible Server" path the parent
+plan's phrasing implies.
 
 ## Outstanding
 
