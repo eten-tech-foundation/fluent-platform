@@ -500,11 +500,9 @@ db_seed() {
     api)
       echo_running "Running fluent-api seeds..."
       if [ "$RUNTIME_MODE" = "podman-pod" ]; then
-        repo_exec api npx tsx src/db/seeds/roles.ts
-        repo_exec api npx tsx src/db/seeds/rbac.ts
+        repo_exec api npm run db:seed
       else
-        $COMPOSE_CMD exec api npx tsx src/db/seeds/roles.ts
-        $COMPOSE_CMD exec api npx tsx src/db/seeds/rbac.ts
+        $COMPOSE_CMD exec api npm run db:seed
       fi
       echo_success "API seeds completed"
       ;;
